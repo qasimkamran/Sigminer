@@ -39,3 +39,18 @@ llvm_map_components_to_libnames(SIGMINER_LLVM_LIBS
 )
 
 target_link_libraries(sigminer PRIVATE ${SIGMINER_LLVM_LIBS})
+
+add_executable(proto
+  src/main.cpp
+)
+
+target_include_directories(proto
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${LLVM_INCLUDE_DIRS}
+)
+
+target_compile_definitions(proto PRIVATE ${LLVM_DEFINITIONS})
+
+target_link_libraries(proto PRIVATE LLVM)
