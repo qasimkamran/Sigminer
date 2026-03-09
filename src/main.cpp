@@ -14,8 +14,7 @@
  *
  * Step 2:
  *  For each subprogram found, resolve return value first as it is the primary type for the
- *  subprogram while making sure that it follows these rules: Always identify the base type even
- *  if it is a pointer. Distinguish pointers with booleans. Represent signedness in an enum. 
+ *  subprogram while making sure that it follows these rules: Represent signedness in an enum. 
  *  Specify the size of the value while discarding the wrapper types.
  */
 
@@ -61,6 +60,77 @@ private:
     Value value;
 };
 
+class Kind {
+public:
+    enum Value {
+        VOID,
+        BOOL,
+        INT,
+        FLOAT,
+        POINTER,
+        ENUM,
+        AGGREGATE,
+        UNKNOWN
+    };
+
+    Kind(Value v = UNKNOWN) : value(v) {}
+
+    const char* toString() const {
+        switch (value) {
+            case VOID: return "void";
+            case BOOL: return "bool";
+            case INT: return "int";
+            case FLOAT: return "float";
+            case POINTER: return "pointer";
+            case ENUM: return "enum";
+            case AGGREGATE: return "aggregate";
+            case UNKNOWN: return "unknown";
+        }
+        return "invalid";
+    }
+
+private:
+    Value value;
+};
+
+class Signedness {
+public:
+    enum Value {
+        SIGNED,
+        UNSIGNED,
+        UNKNOWN
+    };
+
+    Signedness(Value v = UNKNOWN) : value(v) {}
+
+    const char* toString() const {
+        switch (value) {
+            case SIGNED: return "signed";
+            case UNSIGNED: return "unsigned";
+            case UNKNOWN: return "unknown";
+        }
+        return "invalid";
+    }
+
+private:
+    Value value;
+};
+
+class TypeEntry {
+public:
+    Kind kind = Kind::UNKNOWN;
+    Signedness signedness = Signedness::UNKNOWN;
+    size_t size = 0;
+    bool isPointer = false;
+
+    std::string toString() const {
+        return std::string("{kind:") + kind.toString() +
+               ", signedness:" + signedness.toString() +
+               ", size:" + std::to_string(size) +
+               ", isPointer:" + (isPointer ? "true" : "false") + "}";
+    }
+};
+
 static llvm::DWARFDie getTargetSubprogram(const llvm::DWARFDie& cuDie, std::string funcName) {
     for (llvm::DWARFDie die : cuDie.children()) {
         if (die.getTag() != llvm::dwarf::DW_TAG_subprogram)
@@ -89,7 +159,113 @@ static bool isWrapperTag(llvm::dwarf::Tag T) {
   }
 }
 
-llvm::DWARFDie resolveUnderlyingType(llvm::DWARFDie type, unsigned MaxDepth = 64) {
+llvm::DWARFDie resolveUnderlyingType(llvm::DWARFDie type, unsigned MaxDepth = 64);
+
+static Kind tagToKind(llvm::dwarf::Tag tag) {
+    switch (tag) {
+        case llvm::dwarf::DW_TAG_base_type:
+            return Kind::INT;
+        case llvm::dwarf::DW_TAG_pointer_type:
+        case llvm::dwarf::DW_TAG_subroutine_type:
+            return Kind::POINTER;
+        case llvm::dwarf::DW_TAG_enumeration_type:
+            return Kind::ENUM;
+        case llvm::dwarf::DW_TAG_structure_type:
+        case llvm::dwarf::DW_TAG_class_type:
+        case llvm::dwarf::DW_TAG_union_type:
+        case llvm::dwarf::DW_TAG_array_type:
+            return Kind::AGGREGATE;
+        default:
+            return Kind::UNKNOWN;
+    }
+}
+
+static std::optional<uint64_t> getUnsignedAttr(llvm::DWARFDie die, llvm::dwarf::Attribute attr) {
+    if (auto value = die.find(attr)) {
+        if (auto constant = value->getAsUnsignedConstant())
+            return *constant;
+    }
+    return std::nullopt;
+}
+
+static Signedness getSignednessFromTypeDie(llvm::DWARFDie typeDie) {
+    if (!typeDie.isValid())
+        return Signedness::UNKNOWN;
+
+    llvm::dwarf::Tag tag = static_cast<llvm::dwarf::Tag>(typeDie.getTag());
+    if (tag == llvm::dwarf::DW_TAG_base_type) {
+        auto encoding = getUnsignedAttr(typeDie, llvm::dwarf::DW_AT_encoding);
+        if (!encoding)
+            return Signedness::UNKNOWN;
+
+        switch (*encoding) {
+            case llvm::dwarf::DW_ATE_signed:
+            case llvm::dwarf::DW_ATE_signed_char:
+                return Signedness::SIGNED;
+            case llvm::dwarf::DW_ATE_unsigned:
+            case llvm::dwarf::DW_ATE_unsigned_char:
+            case llvm::dwarf::DW_ATE_boolean:
+            case llvm::dwarf::DW_ATE_UTF:
+                return Signedness::UNSIGNED;
+            default:
+                return Signedness::UNKNOWN;
+        }
+    }
+
+    if (tag == llvm::dwarf::DW_TAG_enumeration_type) {
+        llvm::DWARFDie underlying = typeDie.getAttributeValueAsReferencedDie(llvm::dwarf::DW_AT_type);
+        if (underlying.isValid())
+            return getSignednessFromTypeDie(resolveUnderlyingType(underlying));
+    }
+
+    return Signedness::UNKNOWN;
+}
+
+static size_t getSizeFromTypeDie(llvm::DWARFDie typeDie) {
+    if (!typeDie.isValid())
+        return 0;
+
+    if (auto byteSize = getUnsignedAttr(typeDie, llvm::dwarf::DW_AT_byte_size))
+        return static_cast<size_t>(*byteSize);
+
+    llvm::dwarf::Tag tag = static_cast<llvm::dwarf::Tag>(typeDie.getTag());
+    if (tag == llvm::dwarf::DW_TAG_pointer_type || tag == llvm::dwarf::DW_TAG_subroutine_type) {
+        if (const llvm::DWARFUnit* unit = typeDie.getDwarfUnit())
+            return unit->getAddressByteSize();
+    }
+
+    if (tag == llvm::dwarf::DW_TAG_enumeration_type) {
+        llvm::DWARFDie underlying = typeDie.getAttributeValueAsReferencedDie(llvm::dwarf::DW_AT_type);
+        if (underlying.isValid())
+            return getSizeFromTypeDie(resolveUnderlyingType(underlying));
+    }
+
+    return 0;
+}
+
+static TypeEntry typeDieToTypeEntry(llvm::DWARFDie typeDie) {
+    TypeEntry entry = {};
+    if (!typeDie.isValid())
+        return entry;
+
+    llvm::dwarf::Tag tag = static_cast<llvm::dwarf::Tag>(typeDie.getTag());
+    entry.kind = tagToKind(tag);
+    entry.signedness = getSignednessFromTypeDie(typeDie);
+    entry.size = getSizeFromTypeDie(typeDie);
+    entry.isPointer = tag == llvm::dwarf::DW_TAG_pointer_type || tag == llvm::dwarf::DW_TAG_subroutine_type;
+
+    if (tag == llvm::dwarf::DW_TAG_base_type) {
+        auto encoding = getUnsignedAttr(typeDie, llvm::dwarf::DW_AT_encoding);
+        if (encoding == llvm::dwarf::DW_ATE_boolean)
+            entry.kind = Kind::BOOL;
+        else if (encoding == llvm::dwarf::DW_ATE_float)
+            entry.kind = Kind::FLOAT;
+    }
+
+    return entry;
+}
+
+llvm::DWARFDie resolveUnderlyingType(llvm::DWARFDie type, unsigned MaxDepth) {
   if (!type)
       return type;
 
@@ -171,32 +347,34 @@ int main(int argc, char** argv)
     if (!subprogramDie.isSubprogramDIE())
         return RetCode(RetCode::FAIL, "Found DIE is not a subprogram").asint();
 
-    if (!subprogramDie.find(llvm::dwarf::DW_AT_type))
-        return RetCode(RetCode::PASS, "Return type kind - void").asint();
+    if (!subprogramDie.find(llvm::dwarf::DW_AT_type)) {
+        TypeEntry returnTypeEntry = {};
+        returnTypeEntry.kind = Kind::VOID;
+        std::string message = std::string("Return type - ") + returnTypeEntry.toString();
+        return RetCode(RetCode::PASS, message.c_str()).asint();
+    }
 
     llvm::DWARFDie type = subprogramDie.getAttributeValueAsReferencedDie(llvm::dwarf::DW_AT_type);
     if (!type.isValid())
         return RetCode(RetCode::FAIL, "Subprogram has DW_AT_type but it could not be resolved").asint();
 
     llvm::DWARFDie resolvedType = resolveUnderlyingType(type);
+    TypeEntry returnTypeEntry = typeDieToTypeEntry(resolvedType);
+
     llvm::dwarf::Tag returnTag = static_cast<llvm::dwarf::Tag>(resolvedType.getTag());
 
-    std::string kind = tagToString(returnTag);
     std::string typeName = dieNameOrFallback(resolvedType);
 
     if (returnTag == llvm::dwarf::DW_TAG_pointer_type) {
         llvm::DWARFDie pointee = resolvedType.getAttributeValueAsReferencedDie(llvm::dwarf::DW_AT_type);
         if (pointee.isValid()) {
             llvm::DWARFDie basePointee = resolveUnderlyingType(pointee);
-            llvm::dwarf::Tag pointeeTag = static_cast<llvm::dwarf::Tag>(basePointee.getTag());
-            kind = std::string("pointer_to_") + tagToString(pointeeTag);
             typeName = dieNameOrFallback(basePointee);
         } else {
-            kind = "pointer_to_unknown";
+            typeName = "unknown";
         }
     }
 
-    std::string message = "Return type kind - " + kind + ", name - " + typeName;
+    std::string message = "Return type - " + returnTypeEntry.toString() + ", name - " + typeName;
     return RetCode(RetCode::PASS, message.c_str()).asint();
 }
-
