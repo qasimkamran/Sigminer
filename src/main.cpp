@@ -16,6 +16,12 @@
  *  For each subprogram found, resolve return value first as it is the primary type for the
  *  subprogram while making sure that it follows these rules: Represent signedness in an enum. 
  *  Specify the size of the value while discarding the wrapper types.
+ *
+ * Step 3:
+ *  For each subprogram found, collate a list of all arguments using formal_parameters. Follow
+ *  the same routine ap[applied for step 3, where each type is resolved into the now iomplemented
+ *  TypeEntry class, containing kind (primitive type identifier), signedness, a bool for pointer,
+ *  and the size of the type.
  */
 
 #include <cstddef>
@@ -122,12 +128,14 @@ public:
     Signedness signedness = Signedness::UNKNOWN;
     size_t size = 0;
     bool isPointer = false;
+    std::string name = "";
 
     std::string toString() const {
         return std::string("{kind:") + kind.toString() +
                ", signedness:" + signedness.toString() +
                ", size:" + std::to_string(size) +
-               ", isPointer:" + (isPointer ? "true" : "false") + "}";
+               ", isPointer:" + (isPointer ? "true" : "false") +
+               ", name:" + name + "}";
     }
 };
 
@@ -305,6 +313,33 @@ static std::string dieNameOrFallback(llvm::DWARFDie die) {
     return std::string("<unnamed@0x") + std::to_string(die.getOffset()) + ">";
 }
 
+static TypeEntry resolveToTypeEntryFromType(llvm::DWARFDie type) {
+    if (!type.isValid()) {
+        RetCode(RetCode::FAIL, "Subprogram has DW_AT_type but it could not be resolved").asint();
+        return {};
+    }
+
+    llvm::DWARFDie resolvedType = resolveUnderlyingType(type);
+    TypeEntry typeEntry = typeDieToTypeEntry(resolvedType);
+
+    llvm::dwarf::Tag tag = static_cast<llvm::dwarf::Tag>(resolvedType.getTag());
+
+    std::string typeName = dieNameOrFallback(resolvedType);
+
+    if (tag == llvm::dwarf::DW_TAG_pointer_type) {
+        llvm::DWARFDie pointee = resolvedType.getAttributeValueAsReferencedDie(llvm::dwarf::DW_AT_type);
+        if (pointee.isValid()) {
+            llvm::DWARFDie basePointee = resolveUnderlyingType(pointee);
+            typeName = dieNameOrFallback(basePointee);
+        } else {
+            typeName = "unknown";
+        }
+    }
+    typeEntry.name = typeName;
+
+    return typeEntry;
+}
+
 int main(int argc, char** argv)
 {
     if (argc < 3) {
@@ -347,34 +382,27 @@ int main(int argc, char** argv)
     if (!subprogramDie.isSubprogramDIE())
         return RetCode(RetCode::FAIL, "Found DIE is not a subprogram").asint();
 
-    if (!subprogramDie.find(llvm::dwarf::DW_AT_type)) {
-        TypeEntry returnTypeEntry = {};
-        returnTypeEntry.kind = Kind::VOID;
-        std::string message = std::string("Return type - ") + returnTypeEntry.toString();
-        return RetCode(RetCode::PASS, message.c_str()).asint();
+    llvm::DWARFDie returnType = subprogramDie.getAttributeValueAsReferencedDie(llvm::dwarf::DW_AT_type);
+    TypeEntry returnTypeEntry = resolveToTypeEntryFromType(returnType);
+    std::string message = "Return type - " + returnTypeEntry.toString();
+    printf("%s\n", message.c_str());
+
+    std::vector<TypeEntry> argTypeEntries;
+    for (llvm::DWARFDie param : subprogramDie.children()) {
+        if (!param.isValid())
+            continue;
+        llvm::dwarf::Tag tag = static_cast<llvm::dwarf::Tag>(param.getTag());
+        if (tag != llvm::dwarf::DW_TAG_formal_parameter)
+            continue;
+        llvm::DWARFDie argType = param.getAttributeValueAsReferencedDie(llvm::dwarf::DW_AT_type);
+        TypeEntry argTypeEntry = resolveToTypeEntryFromType(argType);
+        argTypeEntries.push_back(argTypeEntry);
     }
 
-    llvm::DWARFDie type = subprogramDie.getAttributeValueAsReferencedDie(llvm::dwarf::DW_AT_type);
-    if (!type.isValid())
-        return RetCode(RetCode::FAIL, "Subprogram has DW_AT_type but it could not be resolved").asint();
-
-    llvm::DWARFDie resolvedType = resolveUnderlyingType(type);
-    TypeEntry returnTypeEntry = typeDieToTypeEntry(resolvedType);
-
-    llvm::dwarf::Tag returnTag = static_cast<llvm::dwarf::Tag>(resolvedType.getTag());
-
-    std::string typeName = dieNameOrFallback(resolvedType);
-
-    if (returnTag == llvm::dwarf::DW_TAG_pointer_type) {
-        llvm::DWARFDie pointee = resolvedType.getAttributeValueAsReferencedDie(llvm::dwarf::DW_AT_type);
-        if (pointee.isValid()) {
-            llvm::DWARFDie basePointee = resolveUnderlyingType(pointee);
-            typeName = dieNameOrFallback(basePointee);
-        } else {
-            typeName = "unknown";
-        }
+    for (TypeEntry typeEntry : argTypeEntries) {
+        std::string message = "Argument type - " + typeEntry.toString();
+        printf("%s\n", message.c_str());
     }
 
-    std::string message = "Return type - " + returnTypeEntry.toString() + ", name - " + typeName;
-    return RetCode(RetCode::PASS, message.c_str()).asint();
+    return RetCode(RetCode::PASS, "All steps passed without failure").asint();
 }
