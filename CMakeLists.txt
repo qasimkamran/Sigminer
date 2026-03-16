@@ -41,7 +41,7 @@ llvm_map_components_to_libnames(SIGMINER_LLVM_LIBS
 target_link_libraries(sigminer PRIVATE ${SIGMINER_LLVM_LIBS})
 
 add_executable(proto
-  src/main.cpp
+  src/prototype.cpp
 )
 
 target_include_directories(proto
