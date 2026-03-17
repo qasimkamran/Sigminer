@@ -1,4 +1,6 @@
 #include "internal/type_classifier.h"
+#include "sigminer/signature.h"
+#include <llvm-14/llvm/BinaryFormat/Dwarf.h>
 #include <llvm-14/llvm/DebugInfo/DWARF/DWARFDie.h>
 
 llvm::DWARFDie StripTypeWrappers( llvm::DWARFDie Start )
@@ -25,5 +27,15 @@ llvm::DWARFDie StripTypeWrappers( llvm::DWARFDie Start )
         Current = Next;
     }
     return Current;
+}
+
+sigminer::TypeEntry MatchBaseTypeToTypeEntry( llvm::DWARFDie BaseTypeDie )
+{
+    if( !BaseTypeDie.isValid() || BaseTypeDie.getTag() != llvm::dwarf::DW_TAG_base_type )
+        return {};
+
+    sigminer::TypeEntry Entry = {};
+    
+    return Entry;
 }
 
