@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <string>
 #include <vector>
 
 namespace sigminer {
@@ -17,12 +18,21 @@ enum class PrimitiveKind
   UNKNOWN
 };
 
+enum class Signedness
+{
+    SIGNED,
+    UNSIGNED,
+    UNKNOWN
+};
+
 class TypeEntry
 {
 public:
     PrimitiveKind Kind = PrimitiveKind::UNKNOWN;
+    Signedness Sign = Signedness::UNKNOWN;
     std::size_t Size = 0;
-    bool Signed = false;
+    bool IsPointer = false;
+    std::string Name{};
 };
 
 class Signature
@@ -34,4 +44,3 @@ public:
 };
 
 } // namespace sigminer
-

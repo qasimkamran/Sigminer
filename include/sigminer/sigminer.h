@@ -1,7 +1,7 @@
 #pragma once
 
-#include <string>
 #include <optional>
+#include <string>
 
 #include "sigminer/signature.h"
 
@@ -22,7 +22,7 @@ enum class ReturnCode
 class Result
 {
 public:
-    std::optional<sigminer::Signature> Sig = std::nullopt;
+    std::optional<Signature> Sig = std::nullopt;
     ReturnCode RetCode = ReturnCode::SUCCESS;
 };
 
@@ -31,4 +31,3 @@ Result GetSignatureFromSharedObjectBySymbol(
         const std::string& Symbol );
 
 } // namespace sigminer
-

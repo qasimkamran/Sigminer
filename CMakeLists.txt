@@ -17,9 +17,12 @@ message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
 add_library(sigminer STATIC
+  src/dwarf_session.cpp
   src/sigminer.cpp
   src/signature_builder.cpp
+  src/subprogram_finder.cpp
   src/type_classifier.cpp
+  src/type_resolver.cpp
 )
 
 target_include_directories(sigminer
@@ -53,4 +56,4 @@ target_include_directories(proto
 
 target_compile_definitions(proto PRIVATE ${LLVM_DEFINITIONS})
 
-target_link_libraries(proto PRIVATE LLVM)
+target_link_libraries(proto PRIVATE sigminer)

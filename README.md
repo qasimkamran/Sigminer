@@ -7,9 +7,33 @@ prototype collapses types into a smaller set of categories such as integer, floa
 and whether the value is pointer-shaped. That makes the output suitable for downstream tooling that cares less about source-level type fidelity and more about ABI-level
 decoding, tracing, or instrumentation.
 
-The current repository is split between an implementation prototype and the intended longer-term library structure. The executable prototype in src/prototype.cpp
-contains the full working flow end to end: it initializes LLVM, opens the input ELF as an object file, builds a DWARFContext, searches compile units for a matching
-subprogram DIE, resolves wrapper types like typedef and const, classifies the underlying type, and prints the mined signature. Around that, the repository defines a
-cleaner public API and a modular layout for a future library version, with separate areas planned for orchestration, signature building, and type classification, but
-those library pieces are still mostly scaffolding. In other words, the project already proves the core concept of mining callable type information from DWARF, while
-also serving as the foundation for a more complete signature extraction library aimed at tracing, BPF-style argument decoding, and other binary introspection workflows.
+The repository now keeps the prototype flow, but split into a small library plus a thin demo executable. The library owns DWARF session setup, subprogram lookup,
+type unwrapping, type classification, and signature assembly. The `proto` executable is just a front-end that calls the library and prints the mined signature.
+
+## File map
+
+### Public headers
+
+- `include/sigminer/sigminer.h`: Main public API entrypoint. Declares `Result`, `ReturnCode`, and `GetSignatureFromSharedObjectBySymbol(...)`.
+- `include/sigminer/signature.h`: Public data model for extracted signatures and simplified types.
+
+### Internal headers
+
+- `src/internal/dwarf_session.h`: Internal session object for opened binaries and their `DWARFContext`.
+- `src/internal/signature_builder.h`: Internal interface for building a `sigminer::Signature` from a subprogram DIE.
+- `src/internal/subprogram_finder.h`: Internal interface for locating a target `DW_TAG_subprogram` in the DWARF compile units.
+- `src/internal/type_classifier.h`: Internal helpers for turning a resolved DWARF type DIE into a `sigminer::TypeEntry`.
+- `src/internal/type_resolver.h`: Internal helpers for stripping typedef/const/volatile-style wrappers and resolving underlying types.
+
+### Library sources
+
+- `src/dwarf_session.cpp`: Opens the input file as an LLVM object file and creates the DWARF session state used by the library.
+- `src/sigminer.cpp`: Main orchestration layer for the public API. Wires together file opening, symbol lookup, and signature building.
+- `src/signature_builder.cpp`: Builds return and parameter type entries from a function DIE and assembles the final `Signature`.
+- `src/subprogram_finder.cpp`: Searches compile units for the requested function/subprogram DIE.
+- `src/type_classifier.cpp`: Classifies resolved DWARF types into Sigminer’s reduced type model, including kind, size, signedness, and display name.
+- `src/type_resolver.cpp`: Resolves through DWARF wrapper/reference layers to find the underlying type used for classification.
+
+### Prototype executable
+
+- `src/prototype.cpp`: Small CLI demo that calls the library and prints the extracted signature in a prototype-friendly text format.
