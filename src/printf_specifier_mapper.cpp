@@ -47,6 +47,7 @@ const std::string TypeEntryToPrintfSpecifier(const sigminer::TypeEntry& typeEntr
         default:
             break;
     }
+    result = "("+typeEntry.Name+")\x20" + result;
     return result;
 }
 
