@@ -33,6 +33,12 @@ public:
     std::size_t Size = 0;
     bool IsPointer = false;
     std::string Name{};
+
+    bool operator!() const {
+        if (Kind == PrimitiveKind::UNKNOWN)
+            return false;
+        return true;
+    }
 };
 
 class Signature

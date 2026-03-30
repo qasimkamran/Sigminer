@@ -23,6 +23,7 @@ add_library(sigminer STATIC
   src/subprogram_finder.cpp
   src/type_classifier.cpp
   src/type_resolver.cpp
+  src/printf_specifier_mapper.cpp
 )
 
 target_include_directories(sigminer

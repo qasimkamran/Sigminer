@@ -10,6 +10,19 @@ decoding, tracing, or instrumentation.
 The repository now keeps the prototype flow, but split into a small library plus a thin demo executable. The library owns DWARF session setup, subprogram lookup,
 type unwrapping, type classification, and signature assembly. The `proto` executable is just a front-end that calls the library and prints the mined signature.
 
+## RHEL 8 dependencies
+
+To build the library and demo binary on RHEL 8, install:
+
+- `cmake`
+- `llvm`
+- `llvm-devel`
+- `gcc-toolset-11-gcc-c++`
+
+If you also want to run `QuickApprove.sh`, install:
+
+- `binutils`
+
 ## File map
 
 ### Public headers
