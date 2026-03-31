@@ -1,14 +1,17 @@
 # Sigminer
 
-Sigminer is a prototype C++ tool for extracting simplified function signatures from ELF binaries and shared objects by reading DWARF debug information through LLVM. The
+Sigminer is a C++ library and companion CLI for extracting simplified function signatures from ELF binaries and shared objects by reading DWARF debug information through LLVM. The
 core idea is to take a binary plus a target function name, locate the corresponding DW_TAG_subprogram entry in the DWARF tree, inspect its declared return type and
 formal parameters, and reduce those DWARF types into a compact, machine-usable representation. Instead of preserving the full richness of C/C++ type information, the
-prototype collapses types into a smaller set of categories such as integer, float, bool, pointer, enum, aggregate, or unknown, while also recording size, signedness,
+library collapses types into a smaller set of categories such as integer, float, bool, pointer, enum, aggregate, or unknown, while also recording size, signedness,
 and whether the value is pointer-shaped. That makes the output suitable for downstream tooling that cares less about source-level type fidelity and more about ABI-level
 decoding, tracing, or instrumentation.
 
-The repository now keeps the prototype flow, but split into a small library plus a thin demo executable. The library owns DWARF session setup, subprogram lookup,
-type unwrapping, type classification, and signature assembly. The `proto` executable is just a front-end that calls the library and prints the mined signature.
+The repository is split into a small library plus a thin demo executable. The library owns DWARF session setup, subprogram lookup, type unwrapping, type classification,
+and signature assembly. The `proto` executable is just a front-end that calls the library and prints the mined signature.
+
+The public surface includes both a native C++ API and a C ABI. The C ABI lives in `include/sigminer/sigminer_c.h` and exposes plain C enums, structs, allocation helpers,
+and exported functions such as `SIGMINER_GetSignatureFromSharedObjectBySymbol(...)` for consumers that need a stable FFI boundary.
 
 ## RHEL 8 dependencies
 
@@ -28,6 +31,7 @@ If you also want to run `QuickApprove.sh`, install:
 ### Public headers
 
 - `include/sigminer/sigminer.h`: Main public API entrypoint. Declares `Result`, `ReturnCode`, and `GetSignatureFromSharedObjectBySymbol(...)`.
+- `include/sigminer/sigminer_c.h`: C ABI entrypoint. Declares the exported C enums, structs, memory-release helpers, and `SIGMINER_*` functions for FFI consumers.
 - `include/sigminer/signature.h`: Public data model for extracted signatures and simplified types.
 
 ### Internal headers
@@ -47,6 +51,6 @@ If you also want to run `QuickApprove.sh`, install:
 - `src/type_classifier.cpp`: Classifies resolved DWARF types into Sigminer’s reduced type model, including kind, size, signedness, and display name.
 - `src/type_resolver.cpp`: Resolves through DWARF wrapper/reference layers to find the underlying type used for classification.
 
-### Prototype executable
+### Demo executable
 
-- `src/prototype.cpp`: Small CLI demo that calls the library and prints the extracted signature in a prototype-friendly text format.
+- `src/prototype.cpp`: Small CLI demo that calls the library and prints the extracted signature in a compact text format.

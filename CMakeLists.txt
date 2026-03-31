@@ -19,6 +19,7 @@ message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 add_library(sigminer STATIC
   src/dwarf_session.cpp
   src/sigminer.cpp
+  src/sigminer_c.cpp
   src/signature_builder.cpp
   src/subprogram_finder.cpp
   src/type_classifier.cpp

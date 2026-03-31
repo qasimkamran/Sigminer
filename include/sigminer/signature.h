@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "sigminer/sigminer_c.h"
+
 namespace sigminer {
 
 enum class PrimitiveKind
@@ -28,6 +30,9 @@ enum class Signedness
 class TypeEntry
 {
 public:
+    TypeEntry() = default;
+    explicit TypeEntry(const ::TypeEntry& source);
+
     PrimitiveKind Kind = PrimitiveKind::UNKNOWN;
     Signedness Sign = Signedness::UNKNOWN;
     std::size_t Size = 0;
