@@ -44,3 +44,6 @@
 build/
 compile_commands.json
 .clangd
+
+# Any temporary scripts in this directory
+qk*
