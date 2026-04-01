@@ -10,14 +10,14 @@ namespace sigminer {
 
 enum class PrimitiveKind
 {
-  VOID,
-  BOOL,
-  INT,
-  FLOAT,
-  POINTER,
-  ENUM,
-  AGGREGATE,
-  UNKNOWN
+    VOID,
+    BOOL,
+    INT,
+    FLOAT,
+    POINTER,
+    ENUM,
+    AGGREGATE,
+    UNKNOWN
 };
 
 enum class Signedness
@@ -39,7 +39,8 @@ public:
     bool IsPointer = false;
     std::string Name{};
 
-    bool operator!() const {
+    bool operator!() const
+    {
         if (Kind == PrimitiveKind::UNKNOWN)
             return false;
         return true;

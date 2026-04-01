@@ -4,9 +4,9 @@
 #include <cstring>
 #include <string>
 
+#include "internal/printf_specifier_mapper.h"
 #include "sigminer/sigminer.h"
 #include "sigminer/signature.h"
-#include "../src/internal/printf_specifier_mapper.h"
 
 namespace {
 
@@ -226,7 +226,7 @@ const char* SIGMINER_TypeEntryToPrintfSpecifier(const TypeEntry* typeEntry)
         return nullptr;
 
     sigminer::TypeEntry cppTypeEntry(*typeEntry);
-    std::string result = TypeEntryToPrintfSpecifier(cppTypeEntry);
+    std::string result = printf_specifier_mapper::TypeEntryToPrintfSpecifier(cppTypeEntry);
 
     if (result.empty())
         return nullptr;
@@ -245,7 +245,7 @@ const char* SIGMINER_SignatureParamsToPrintfSpecifier(const Signature* sig)
     for (size_t i = 0; i < sig->ParamCount; ++i)
         cppTypeEntries.emplace_back(sig->Params[i]);
 
-    std::string result = TypeEntriesToPrintfSpecifier(cppTypeEntries);
+    std::string result = printf_specifier_mapper::TypeEntriesToPrintfSpecifier(cppTypeEntries);
     if (result.empty())
         return nullptr;
 

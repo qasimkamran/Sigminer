@@ -7,7 +7,7 @@
 #include "sigminer/signature.h"
 #include "sigminer/sigminer.h"
 
-namespace sigminer {
+namespace bpftrace_mapper {
 
 enum class BpftraceProbeKind
 {
@@ -17,48 +17,48 @@ enum class BpftraceProbeKind
 
 struct BpftraceProbeTarget
 {
-    std::string ModulePath;
-    std::string Symbol;
+    std::string modulePath;
+    std::string symbol;
 };
 
 struct BpftraceRenderOptions
 {
-    std::optional<int> Pid{};
-    bool IncludeEntryProbe = true;
-    bool IncludeReturnProbe = true;
-    bool IncludeTimingMs = true;
-    bool IncludeUserStack = false;
-    bool IncludeArgumentPrinting = true;
-    bool IncludeReturnPrinting = true;
+    std::optional<int> pid{};
+    bool includeEntryProbe = true;
+    bool includeReturnProbe = true;
+    bool includeTimingMs = true;
+    bool includeUserStack = false;
+    bool includeArgumentPrinting = true;
+    bool includeReturnPrinting = true;
 };
 
 struct BpftraceResolvedSymbol
 {
-    BpftraceProbeTarget Target;
-    Signature Sig{};
+    BpftraceProbeTarget target;
+    sigminer::Signature sig{};
 };
 
-Result FindSignatureInModulesBySymbol(
-        const std::vector<std::string>& ModulePaths,
-        const std::string& Symbol,
-        BpftraceResolvedSymbol* Resolved);
+sigminer::Result FindSignatureInModulesBySymbol(
+        const std::vector<std::string>& modulePaths,
+        const std::string& symbol,
+        BpftraceResolvedSymbol* resolved);
 
-std::string BuildBpftraceArgumentPrintExpr(const Signature& Sig);
+std::string BuildBpftraceArgumentPrintExpr(const sigminer::Signature& sig);
 
-std::string BuildBpftraceReturnPrintExpr(const TypeEntry& RetType);
+std::string BuildBpftraceReturnPrintExpr(const sigminer::TypeEntry& retType);
 
 std::string BuildBpftraceProbeBody(
-        BpftraceProbeKind ProbeKind,
-        const Signature& Sig,
-        const BpftraceRenderOptions& Options);
+        BpftraceProbeKind probeKind,
+        const sigminer::Signature& sig,
+        const BpftraceRenderOptions& opts);
 
 std::string BuildBpftraceUprobeScript(
-        const BpftraceProbeTarget& Target,
-        const Signature& Sig,
-        const BpftraceRenderOptions& Options);
+        const BpftraceProbeTarget& target,
+        const sigminer::Signature& sig,
+        const BpftraceRenderOptions& opts);
 
 std::string BuildBpftraceUprobeScript(
-        const std::vector<BpftraceResolvedSymbol>& ResolvedSymbols,
-        const BpftraceRenderOptions& Options);
+        const std::vector<BpftraceResolvedSymbol>& resolvedSymbols,
+        const BpftraceRenderOptions& opts);
 
-} // namespace sigminer
+} // namespace bpftrace_mapper

@@ -27,7 +27,7 @@ public:
 };
 
 Result GetSignatureFromSharedObjectBySymbol(
-        const std::string& SharedObjectFilePath,
-        const std::string& Symbol );
+        const std::string& sharedObjectFilePath,
+        const std::string& symbol);
 
 } // namespace sigminer

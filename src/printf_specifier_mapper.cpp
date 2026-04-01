@@ -1,11 +1,13 @@
-#include "../src/internal/printf_specifier_mapper.h"
-#include "sigminer/signature.h"
 #include <string>
 
-const std::string TypeEntryToPrintfSpecifier(const sigminer::TypeEntry& typeEntry) {
+#include "internal/printf_specifier_mapper.h"
+
+namespace printf_specifier_mapper {
+
+std::string TypeEntryToPrintfSpecifier(const sigminer::TypeEntry& typeEntry)
+{
     std::string result;
-    switch (typeEntry.Kind)
-    {
+    switch (typeEntry.Kind) {
         case sigminer::PrimitiveKind::POINTER:
             result = "%p";
             break;
@@ -47,26 +49,29 @@ const std::string TypeEntryToPrintfSpecifier(const sigminer::TypeEntry& typeEntr
         default:
             break;
     }
-    result = "("+typeEntry.Name+")\x20" + result;
+    result = "(" + typeEntry.Name + ") " + result;
     return result;
 }
 
-const std::string TypeEntriesToPrintfSpecifier(const std::vector<sigminer::TypeEntry>& typeEntries)
+std::string TypeEntriesToPrintfSpecifier(const std::vector<sigminer::TypeEntry>& typeEntries)
 {
     std::string result;
 
-    if (typeEntries.size() <= 0)
+    if (typeEntries.empty())
         return result;
-    
-    for (int i=0; i<typeEntries.size(); i++) {
+
+    for (std::size_t i = 0; i < typeEntries.size(); ++i) {
         std::string specifier = TypeEntryToPrintfSpecifier(typeEntries[i]);
-        if(!specifier.empty())
+        if (!specifier.empty())
             result += specifier;
         else
             continue;
+
         if (i != typeEntries.size() - 1)
-            result += '\x20';
+            result += ' ';
     }
 
     return result;
 }
+
+} // namespace printf_specifier_mapper
