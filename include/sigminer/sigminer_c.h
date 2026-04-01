@@ -64,11 +64,62 @@ typedef struct Result
     ReturnCode RetCode;
 } Result;
 
+typedef enum BpftraceProbeKind
+{
+    BPFTRACE_PROBE_KIND_ENTRY = 0,
+    BPFTRACE_PROBE_KIND_RETURN
+} BpftraceProbeKind;
+
+typedef struct BpftraceProbeTarget
+{
+    const char* ModulePath;
+    const char* Symbol;
+} BpftraceProbeTarget;
+
+typedef struct BpftraceRenderOptions
+{
+    bool HasPid;
+    int Pid;
+    bool IncludeEntryProbe;
+    bool IncludeReturnProbe;
+    bool IncludeTimingMs;
+    bool IncludeUserStack;
+    bool IncludeArgumentPrinting;
+    bool IncludeReturnPrinting;
+} BpftraceRenderOptions;
+
+typedef struct BpftraceResolvedSymbol
+{
+    BpftraceProbeTarget Target;
+    Signature Sig;
+} BpftraceResolvedSymbol;
+
 Result SIGMINER_GetSignatureFromSharedObjectBySymbol( const char* SharedObjectFilePath, const char* Symbol );
+Result SIGMINER_FindSignatureInModulesBySymbol(
+        const char* const* ModulePaths,
+        size_t ModulePathCount,
+        const char* Symbol,
+        BpftraceResolvedSymbol* Resolved );
 void SIGMINER_FreeSignature( Signature* Sig );
 void SIGMINER_FreeResult( Result* Res );
+void SIGMINER_FreeBpftraceResolvedSymbol( BpftraceResolvedSymbol* Resolved );
+void SIGMINER_FreeCString( const char* Str );
 const char* SIGMINER_TypeEntryToPrintfSpecifier( const TypeEntry* typeEntry );
 const char* SIGMINER_SignatureParamsToPrintfSpecifier( const Signature* Sig );
+const char* SIGMINER_BuildBpftraceArgumentPrintExpr( const Signature* Sig );
+const char* SIGMINER_BuildBpftraceReturnPrintExpr( const TypeEntry* RetType );
+const char* SIGMINER_BuildBpftraceProbeBody(
+        BpftraceProbeKind ProbeKind,
+        const Signature* Sig,
+        const BpftraceRenderOptions* Opts );
+const char* SIGMINER_BuildBpftraceUprobeScriptForTarget(
+        const BpftraceProbeTarget* Target,
+        const Signature* Sig,
+        const BpftraceRenderOptions* Opts );
+const char* SIGMINER_BuildBpftraceUprobeScriptForResolvedSymbols(
+        const BpftraceResolvedSymbol* ResolvedSymbols,
+        size_t ResolvedSymbolCount,
+        const BpftraceRenderOptions* Opts );
 
 #ifdef __cplusplus
 }
