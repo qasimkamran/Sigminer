@@ -22,8 +22,8 @@ enum class ReturnCode
 class Result
 {
 public:
-    std::optional<Signature> Sig = std::nullopt;
-    ReturnCode RetCode = ReturnCode::SUCCESS;
+    std::optional<Signature> sig = std::nullopt;
+    ReturnCode retCode = ReturnCode::SUCCESS;
 };
 
 Result GetSignatureFromSharedObjectBySymbol(

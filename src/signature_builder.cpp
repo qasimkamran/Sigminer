@@ -28,7 +28,7 @@ sigminer::TypeEntry ResolveToTypeEntryFromType(llvm::DWARFDie type)
         }
     }
 
-    typeEntry.Name = std::move(typeName);
+    typeEntry.name = std::move(typeName);
     return typeEntry;
 }
 
@@ -37,7 +37,7 @@ sigminer::Signature BuildSignature(llvm::DWARFDie subprogramDie)
     sigminer::Signature signature{};
 
     llvm::DWARFDie returnType = subprogramDie.getAttributeValueAsReferencedDie(llvm::dwarf::DW_AT_type);
-    signature.Ret = ResolveToTypeEntryFromType(returnType);
+    signature.ret = ResolveToTypeEntryFromType(returnType);
 
     for (llvm::DWARFDie child : subprogramDie.children()) {
         if (!child.isValid())
@@ -46,9 +46,9 @@ sigminer::Signature BuildSignature(llvm::DWARFDie subprogramDie)
         const auto tag = static_cast<llvm::dwarf::Tag>(child.getTag());
         if (tag == llvm::dwarf::DW_TAG_formal_parameter) {
             llvm::DWARFDie paramType = child.getAttributeValueAsReferencedDie(llvm::dwarf::DW_AT_type);
-            signature.Params.push_back(ResolveToTypeEntryFromType(paramType));
+            signature.params.push_back(ResolveToTypeEntryFromType(paramType));
         } else if (tag == llvm::dwarf::DW_TAG_unspecified_parameters) {
-            signature.HasVarArgs = true;
+            signature.hasVarArgs = true;
         }
     }
 

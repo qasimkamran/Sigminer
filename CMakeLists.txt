@@ -25,6 +25,7 @@ add_library(sigminer STATIC
   src/type_classifier.cpp
   src/type_resolver.cpp
   src/printf_specifier_mapper.cpp
+  src/bpftrace_mapper.cpp
 )
 
 target_include_directories(sigminer

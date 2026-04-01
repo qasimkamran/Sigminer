@@ -108,18 +108,18 @@ sigminer::TypeEntry TypeDieToTypeEntry(llvm::DWARFDie typeDie)
         return entry;
 
     const auto tag = static_cast<llvm::dwarf::Tag>(typeDie.getTag());
-    entry.Kind = TagToKind(tag);
-    entry.Sign = GetSignednessFromTypeDie(typeDie);
-    entry.Size = GetSizeFromTypeDie(typeDie);
-    entry.IsPointer =
+    entry.kind = TagToKind(tag);
+    entry.sign = GetSignednessFromTypeDie(typeDie);
+    entry.size = GetSizeFromTypeDie(typeDie);
+    entry.isPointer =
             tag == llvm::dwarf::DW_TAG_pointer_type || tag == llvm::dwarf::DW_TAG_subroutine_type;
 
     if (tag == llvm::dwarf::DW_TAG_base_type) {
         const auto encoding = GetUnsignedAttr(typeDie, llvm::dwarf::DW_AT_encoding);
         if (encoding && *encoding == llvm::dwarf::DW_ATE_boolean) {
-            entry.Kind = sigminer::PrimitiveKind::BOOL;
+            entry.kind = sigminer::PrimitiveKind::BOOL;
         } else if (encoding && *encoding == llvm::dwarf::DW_ATE_float) {
-            entry.Kind = sigminer::PrimitiveKind::FLOAT;
+            entry.kind = sigminer::PrimitiveKind::FLOAT;
         }
     }
 

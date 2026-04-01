@@ -12,9 +12,9 @@ namespace dwarf_session {
 
 struct Session
 {
-    llvm::object::OwningBinary<llvm::object::Binary> Binary;
-    llvm::object::ObjectFile* Object = nullptr;
-    std::unique_ptr<llvm::DWARFContext> Context;
+    llvm::object::OwningBinary<llvm::object::Binary> binary;
+    llvm::object::ObjectFile* object = nullptr;
+    std::unique_ptr<llvm::DWARFContext> context;
 
     Session(llvm::object::OwningBinary<llvm::object::Binary>&& binary,
             llvm::object::ObjectFile* object,

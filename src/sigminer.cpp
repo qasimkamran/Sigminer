@@ -15,7 +15,7 @@ Result GetSignatureFromSharedObjectBySymbol(
     Result result{};
 
     if (sharedObjectFilePath.empty() || symbol.empty()) {
-        result.RetCode = ReturnCode::INVALID_INPUT;
+        result.retCode = ReturnCode::INVALID_INPUT;
         return result;
     }
 
@@ -23,32 +23,32 @@ Result GetSignatureFromSharedObjectBySymbol(
     if (!sessionOrErr) {
         const std::string error = llvm::toString(sessionOrErr.takeError());
         if (error.find("object file") != std::string::npos) {
-            result.RetCode = ReturnCode::INVALID_INPUT;
+            result.retCode = ReturnCode::INVALID_INPUT;
         } else {
-            result.RetCode = ReturnCode::FILE_OPEN_FAILURE;
+            result.retCode = ReturnCode::FILE_OPEN_FAILURE;
         }
         return result;
     }
 
     dwarf_session::Session& session = *sessionOrErr;
-    if (!session.Context) {
-        result.RetCode = ReturnCode::DWARF_UNAVAILABLE;
+    if (!session.context) {
+        result.retCode = ReturnCode::DWARF_UNAVAILABLE;
         return result;
     }
 
-    llvm::DWARFDie subprogramDie = subprogram_finder::GetTargetSubprogram(*session.Context, symbol);
+    llvm::DWARFDie subprogramDie = subprogram_finder::GetTargetSubprogram(*session.context, symbol);
     if (!subprogramDie.isValid()) {
-        result.RetCode = ReturnCode::SYMBOL_RESOLUTION_FAILURE;
+        result.retCode = ReturnCode::SYMBOL_RESOLUTION_FAILURE;
         return result;
     }
 
     if (!subprogramDie.isSubprogramDIE()) {
-        result.RetCode = ReturnCode::FUNCTION_DIE_NOT_IN_RANGE;
+        result.retCode = ReturnCode::FUNCTION_DIE_NOT_IN_RANGE;
         return result;
     }
 
-    result.Sig = signature_builder::BuildSignature(subprogramDie);
-    result.RetCode = ReturnCode::SUCCESS;
+    result.sig = signature_builder::BuildSignature(subprogramDie);
+    result.retCode = ReturnCode::SUCCESS;
     return result;
 }
 

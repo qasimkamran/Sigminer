@@ -34,11 +34,11 @@ void PrintType(const char* label, const sigminer::TypeEntry& entry)
     std::printf(
             "%s - {kind:%s, signedness:%s, size:%zu, isPointer:%s, name:%s}\n",
             label,
-            ToString(entry.Kind),
-            ToString(entry.Sign),
-            entry.Size,
-            entry.IsPointer ? "true" : "false",
-            entry.Name.c_str());
+            ToString(entry.kind),
+            ToString(entry.sign),
+            entry.size,
+            entry.isPointer ? "true" : "false",
+            entry.name.c_str());
 }
 
 } // namespace
@@ -52,13 +52,13 @@ int main(int argc, char** argv)
 
     const sigminer::Result result =
             sigminer::GetSignatureFromSharedObjectBySymbol(argv[1], argv[2]);
-    if (!result.Sig) {
-        std::printf("FAIL: library returned code %d\n", static_cast<int>(result.RetCode));
+    if (!result.sig) {
+        std::printf("FAIL: library returned code %d\n", static_cast<int>(result.retCode));
         return 1;
     }
 
-    PrintType("Return type", result.Sig->Ret);
-    for (const sigminer::TypeEntry& typeEntry : result.Sig->Params)
+    PrintType("Return type", result.sig->ret);
+    for (const sigminer::TypeEntry& typeEntry : result.sig->params)
         PrintType("Argument type", typeEntry);
 
     std::printf("PASS: all steps passed without failure\n");

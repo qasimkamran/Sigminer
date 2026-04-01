@@ -92,13 +92,13 @@ bool CopyTypeEntry(const sigminer::TypeEntry& source, TypeEntry* dest)
     if (dest == nullptr)
         return false;
 
-    dest->Kind = ToCPrimitiveKind(source.Kind);
-    dest->Sign = ToCSignedness(source.Sign);
-    dest->Size = source.Size;
-    dest->IsPointer = source.IsPointer;
-    dest->Name = DuplicateCString(source.Name);
+    dest->Kind = ToCPrimitiveKind(source.kind);
+    dest->Sign = ToCSignedness(source.sign);
+    dest->Size = source.size;
+    dest->IsPointer = source.isPointer;
+    dest->Name = DuplicateCString(source.name);
 
-    if (dest->Name == nullptr && !source.Name.empty())
+    if (dest->Name == nullptr && !source.name.empty())
         return false;
 
     return true;
@@ -132,11 +132,11 @@ void ZeroSignature(Signature* sig)
 namespace sigminer {
 
 TypeEntry::TypeEntry(const ::TypeEntry& source)
-    : Kind(ToCppPrimitiveKind(source.Kind)),
-      Sign(ToCppSignedness(source.Sign)),
-      Size(source.Size),
-      IsPointer(source.IsPointer),
-      Name(source.Name != nullptr ? source.Name : "")
+    : kind(ToCppPrimitiveKind(source.Kind)),
+      sign(ToCppSignedness(source.Sign)),
+      size(source.Size),
+      isPointer(source.IsPointer),
+      name(source.Name != nullptr ? source.Name : "")
 {
 }
 
@@ -156,21 +156,21 @@ Result SIGMINER_GetSignatureFromSharedObjectBySymbol(
 
     const sigminer::Result cppResult =
             sigminer::GetSignatureFromSharedObjectBySymbol(sharedObjectFilePath, symbol);
-    result.RetCode = ToCReturnCode(cppResult.RetCode);
+    result.RetCode = ToCReturnCode(cppResult.retCode);
 
-    if (!cppResult.Sig)
+    if (!cppResult.sig)
         return result;
 
     ZeroSignature(&result.Sig);
-    result.Sig.HasVarArgs = cppResult.Sig->HasVarArgs;
+    result.Sig.HasVarArgs = cppResult.sig->hasVarArgs;
 
-    if (!CopyTypeEntry(cppResult.Sig->Ret, &result.Sig.Ret)) {
+    if (!CopyTypeEntry(cppResult.sig->ret, &result.Sig.Ret)) {
         SIGMINER_FreeResult(&result);
         result.RetCode = RETURN_CODE_INTERNAL_FAILURE;
         return result;
     }
 
-    result.Sig.ParamCount = cppResult.Sig->Params.size();
+    result.Sig.ParamCount = cppResult.sig->params.size();
     if (result.Sig.ParamCount != 0) {
         result.Sig.Params = static_cast<TypeEntry*>(
                 std::calloc(result.Sig.ParamCount, sizeof(TypeEntry)));
@@ -181,7 +181,7 @@ Result SIGMINER_GetSignatureFromSharedObjectBySymbol(
         }
 
         for (size_t i = 0; i < result.Sig.ParamCount; ++i) {
-            if (!CopyTypeEntry(cppResult.Sig->Params[i], &result.Sig.Params[i])) {
+            if (!CopyTypeEntry(cppResult.sig->params[i], &result.Sig.Params[i])) {
                 SIGMINER_FreeResult(&result);
                 result.RetCode = RETURN_CODE_INTERNAL_FAILURE;
                 return result;

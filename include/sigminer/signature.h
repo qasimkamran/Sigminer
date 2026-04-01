@@ -33,15 +33,15 @@ public:
     TypeEntry() = default;
     explicit TypeEntry(const ::TypeEntry& source);
 
-    PrimitiveKind Kind = PrimitiveKind::UNKNOWN;
-    Signedness Sign = Signedness::UNKNOWN;
-    std::size_t Size = 0;
-    bool IsPointer = false;
-    std::string Name{};
+    PrimitiveKind kind = PrimitiveKind::UNKNOWN;
+    Signedness sign = Signedness::UNKNOWN;
+    std::size_t size = 0;
+    bool isPointer = false;
+    std::string name{};
 
     bool operator!() const
     {
-        if (Kind == PrimitiveKind::UNKNOWN)
+        if (kind == PrimitiveKind::UNKNOWN)
             return false;
         return true;
     }
@@ -50,9 +50,9 @@ public:
 class Signature
 {
 public:
-    TypeEntry Ret{};
-    std::vector<TypeEntry> Params{};
-    bool HasVarArgs = false;
+    TypeEntry ret{};
+    std::vector<TypeEntry> params{};
+    bool hasVarArgs = false;
 };
 
 } // namespace sigminer

@@ -7,7 +7,7 @@ namespace printf_specifier_mapper {
 std::string TypeEntryToPrintfSpecifier(const sigminer::TypeEntry& typeEntry)
 {
     std::string result;
-    switch (typeEntry.Kind) {
+    switch (typeEntry.kind) {
         case sigminer::PrimitiveKind::POINTER:
             result = "%p";
             break;
@@ -18,13 +18,13 @@ std::string TypeEntryToPrintfSpecifier(const sigminer::TypeEntry& typeEntry)
 
         case sigminer::PrimitiveKind::INT:
         case sigminer::PrimitiveKind::ENUM:
-            if (typeEntry.Size == 8) {
-                if (typeEntry.Sign == sigminer::Signedness::SIGNED)
+            if (typeEntry.size == 8) {
+                if (typeEntry.sign == sigminer::Signedness::SIGNED)
                     result = "%ld";
-                else if (typeEntry.Sign == sigminer::Signedness::UNSIGNED)
+                else if (typeEntry.sign == sigminer::Signedness::UNSIGNED)
                     result = "%lu";
             } else {
-                if (typeEntry.Sign == sigminer::Signedness::UNSIGNED)
+                if (typeEntry.sign == sigminer::Signedness::UNSIGNED)
                     result = "%u";
                 else
                     result = "%d";
@@ -32,7 +32,7 @@ std::string TypeEntryToPrintfSpecifier(const sigminer::TypeEntry& typeEntry)
             break;
 
         case sigminer::PrimitiveKind::FLOAT:
-            if (typeEntry.Size == 8)
+            if (typeEntry.size == 8)
                 result = "%lx";
             else
                 result = "%x";
@@ -40,7 +40,7 @@ std::string TypeEntryToPrintfSpecifier(const sigminer::TypeEntry& typeEntry)
 
         case sigminer::PrimitiveKind::AGGREGATE:
         case sigminer::PrimitiveKind::UNKNOWN:
-            if (typeEntry.IsPointer)
+            if (typeEntry.isPointer)
                 result = "%p";
             else
                 result = "%lx";
@@ -49,7 +49,7 @@ std::string TypeEntryToPrintfSpecifier(const sigminer::TypeEntry& typeEntry)
         default:
             break;
     }
-    result = "(" + typeEntry.Name + ") " + result;
+    result = "(" + typeEntry.name + ") " + result;
     return result;
 }
 

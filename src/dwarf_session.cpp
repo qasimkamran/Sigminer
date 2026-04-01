@@ -9,7 +9,7 @@ namespace dwarf_session {
 Session::Session(llvm::object::OwningBinary<llvm::object::Binary>&& binary,
                  llvm::object::ObjectFile* object,
                  std::unique_ptr<llvm::DWARFContext>&& context)
-    : Binary(std::move(binary)), Object(object), Context(std::move(context))
+    : binary(std::move(binary)), object(object), context(std::move(context))
 {
 }
 
