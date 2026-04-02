@@ -60,3 +60,39 @@ target_include_directories(proto
 target_compile_definitions(proto PRIVATE ${LLVM_DEFINITIONS})
 
 target_link_libraries(proto PRIVATE sigminer)
+
+add_executable(bpftrace
+  test/bpftrace.cpp
+)
+
+target_include_directories(bpftrace
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${LLVM_INCLUDE_DIRS}
+)
+
+target_compile_definitions(bpftrace PRIVATE ${LLVM_DEFINITIONS})
+
+target_link_libraries(bpftrace PRIVATE sigminer)
+
+add_library(mock_lib SHARED
+  test/mock_lib.c
+)
+
+set_target_properties(mock_lib PROPERTIES
+  OUTPUT_NAME mock_lib
+)
+
+target_compile_options(mock_lib PRIVATE
+  -O0
+  -g
+  -fno-omit-frame-pointer
+  -fno-inline
+)
+
+add_executable(mock
+  test/mock_live.cpp
+)
+
+target_link_libraries(mock PRIVATE mock_lib)
