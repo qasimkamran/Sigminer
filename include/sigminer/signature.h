@@ -50,6 +50,9 @@ public:
 class Signature
 {
 public:
+    Signature() = default;
+    explicit Signature(const ::Signature& source);
+
     TypeEntry ret{};
     std::vector<TypeEntry> params{};
     bool hasVarArgs = false;

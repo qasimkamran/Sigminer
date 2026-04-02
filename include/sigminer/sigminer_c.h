@@ -79,7 +79,7 @@ typedef struct BpftraceProbeTarget
 typedef struct BpftraceRenderOptions
 {
     bool HasPid;
-    int Pid;
+    int  Pid;
     bool IncludeEntryProbe;
     bool IncludeReturnProbe;
     bool IncludeTimingMs;

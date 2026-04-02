@@ -2,8 +2,10 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <optional>
 #include <string>
 
+#include "internal/bpftrace_mapper.h"
 #include "internal/printf_specifier_mapper.h"
 #include "sigminer/sigminer.h"
 #include "sigminer/signature.h"
@@ -77,6 +79,61 @@ ReturnCode ToCReturnCode(sigminer::ReturnCode code)
     return RETURN_CODE_INTERNAL_FAILURE;
 }
 
+std::vector<sigminer::TypeEntry> ToCppTypeEntryVector(const TypeEntry* params, size_t paramsList)
+{
+    std::vector<sigminer::TypeEntry> cppParams(paramsList);
+    for (int i=0; i<paramsList; ++i) {
+        if (params[i].Kind == PRIMITIVE_KIND_UNKNOWN)
+            cppParams.emplace_back(params[i]);
+        else
+            cppParams.emplace_back();
+    }
+    return cppParams;
+}
+
+bpftrace_mapper::BpftraceRenderOptions ToCppBpfTraceRenderOptions(const BpftraceRenderOptions* Opts)
+{
+    bpftrace_mapper::BpftraceRenderOptions cppOpts{};
+
+    if (Opts == nullptr)
+        return cppOpts;
+
+    cppOpts.pid = Opts->HasPid ? std::optional<int>(Opts->Pid) : std::nullopt;
+    cppOpts.includeEntryProbe = Opts->IncludeEntryProbe;
+    cppOpts.includeReturnProbe = Opts->IncludeReturnProbe;
+    cppOpts.includeTimingMs = Opts->IncludeTimingMs;
+    cppOpts.includeUserStack = Opts->IncludeUserStack;
+    cppOpts.includeArgumentPrinting = Opts->IncludeArgumentPrinting;
+    cppOpts.includeReturnPrinting = Opts->IncludeReturnPrinting;
+
+    return cppOpts;
+}
+
+bpftrace_mapper::BpftraceProbeTarget ToCppBpftraceProbeTarget(const BpftraceProbeTarget& target)
+{
+    bpftrace_mapper::BpftraceProbeTarget cppTarget{};
+    cppTarget.modulePath = target.ModulePath != nullptr ? target.ModulePath : "";
+    cppTarget.symbol = target.Symbol != nullptr ? target.Symbol : "";
+    return cppTarget;
+}
+
+std::vector<bpftrace_mapper::BpftraceResolvedSymbol> ToCppBpftraceResolvedSymbols(
+        const BpftraceResolvedSymbol* resolvedSymbols,
+        size_t resolvedSymbolCount)
+{
+    std::vector<bpftrace_mapper::BpftraceResolvedSymbol> cppResolvedSymbols;
+    cppResolvedSymbols.reserve(resolvedSymbolCount);
+
+    for (size_t i = 0; i < resolvedSymbolCount; ++i) {
+        bpftrace_mapper::BpftraceResolvedSymbol cppResolved{};
+        cppResolved.target = ToCppBpftraceProbeTarget(resolvedSymbols[i].Target);
+        cppResolved.sig = sigminer::Signature(resolvedSymbols[i].Sig);
+        cppResolvedSymbols.push_back(std::move(cppResolved));
+    }
+
+    return cppResolvedSymbols;
+}
+
 char* DuplicateCString(const std::string& value)
 {
     char* copy = static_cast<char*>(std::malloc(value.size() + 1));
@@ -137,6 +194,13 @@ TypeEntry::TypeEntry(const ::TypeEntry& source)
       size(source.Size),
       isPointer(source.IsPointer),
       name(source.Name != nullptr ? source.Name : "")
+{
+}
+
+Signature::Signature(const ::Signature& source)
+    : ret(source.Ret),
+      params(ToCppTypeEntryVector(source.Params, source.ParamCount)),
+      hasVarArgs(source.HasVarArgs)
 {
 }
 
@@ -246,6 +310,127 @@ const char* SIGMINER_SignatureParamsToPrintfSpecifier(const Signature* sig)
         cppTypeEntries.emplace_back(sig->Params[i]);
 
     std::string result = printf_specifier_mapper::TypeEntriesToPrintfSpecifier(cppTypeEntries);
+    if (result.empty())
+        return nullptr;
+
+    return DuplicateCString(result);
+}
+
+const char* SIGMINER_BuildBpftraceArgumentPrintExpr( const Signature* Sig )
+{
+    if (Sig == nullptr)
+        return nullptr;
+
+    if (Sig->ParamCount != 0 && Sig->Params == nullptr)
+        return nullptr;
+
+    sigminer::Signature cppSignature(*Sig);
+
+    std::string result = bpftrace_mapper::BuildBpftraceArgumentPrintExpr(cppSignature);
+
+    if (result.empty())
+        return nullptr;
+
+    return DuplicateCString(result);
+}
+
+const char* SIGMINER_BuildBpftraceReturnPrintExpr( const TypeEntry* RetType )
+{
+    if (RetType == nullptr)
+        return nullptr;
+
+    sigminer::TypeEntry cppRetType(*RetType);
+
+    std::string result = bpftrace_mapper::BuildBpftraceReturnPrintExpr(cppRetType);
+
+    if (result.empty())
+        return nullptr;
+
+    return DuplicateCString(result);
+}
+
+const char* SIGMINER_BuildBpftraceProbeBody(
+        BpftraceProbeKind ProbeKind,
+        const Signature* Sig,
+        const BpftraceRenderOptions* Opts )
+{
+    if (Sig == nullptr)
+        return nullptr;
+
+    if (Sig->ParamCount != 0 && Sig->Params == nullptr)
+        return nullptr;
+
+    bpftrace_mapper::BpftraceProbeKind cppProbeKind;
+    if (ProbeKind == BPFTRACE_PROBE_KIND_ENTRY)
+        cppProbeKind = bpftrace_mapper::BpftraceProbeKind::ENTRY;
+    else if (ProbeKind == BPFTRACE_PROBE_KIND_RETURN)
+        cppProbeKind = bpftrace_mapper::BpftraceProbeKind::RETURN;
+    else
+        return nullptr;
+
+    sigminer::Signature cppSig(*Sig);
+
+    bpftrace_mapper::BpftraceRenderOptions cppOpts = ToCppBpfTraceRenderOptions(Opts);
+
+    std::string result = bpftrace_mapper::BuildBpftraceProbeBody(cppProbeKind, cppSig, cppOpts);
+
+    if (result.empty())
+        return nullptr;
+
+    return DuplicateCString(result);
+}
+
+const char* SIGMINER_BuildBpftraceUprobeScriptForTarget(
+        const BpftraceProbeTarget* Target,
+        const Signature* Sig,
+        const BpftraceRenderOptions* Opts )
+{
+    if (Target == nullptr || Sig == nullptr)
+        return nullptr;
+
+    if (Target->ModulePath == nullptr || Target->Symbol == nullptr)
+        return nullptr;
+
+    if (Sig->ParamCount != 0 && Sig->Params == nullptr)
+        return nullptr;
+
+    const bpftrace_mapper::BpftraceProbeTarget cppTarget = ToCppBpftraceProbeTarget(*Target);
+    const sigminer::Signature cppSig(*Sig);
+    const bpftrace_mapper::BpftraceRenderOptions cppOpts = ToCppBpfTraceRenderOptions(Opts);
+
+    std::string result = bpftrace_mapper::BuildBpftraceUprobeScript(cppTarget, cppSig, cppOpts);
+
+    if (result.empty())
+        return nullptr;
+
+    return DuplicateCString(result);
+}
+
+const char* SIGMINER_BuildBpftraceUprobeScriptForResolvedSymbols(
+        const BpftraceResolvedSymbol* ResolvedSymbols,
+        size_t ResolvedSymbolCount,
+        const BpftraceRenderOptions* Opts )
+{
+    if (ResolvedSymbols == nullptr && ResolvedSymbolCount != 0)
+        return nullptr;
+
+    for (size_t i = 0; i < ResolvedSymbolCount; ++i) {
+        if (ResolvedSymbols[i].Target.ModulePath == nullptr ||
+            ResolvedSymbols[i].Target.Symbol == nullptr)
+            return nullptr;
+
+        if (ResolvedSymbols[i].Sig.ParamCount != 0 &&
+            ResolvedSymbols[i].Sig.Params == nullptr)
+            return nullptr;
+    }
+
+    const std::vector<bpftrace_mapper::BpftraceResolvedSymbol> cppResolvedSymbols =
+            ToCppBpftraceResolvedSymbols(ResolvedSymbols, ResolvedSymbolCount);
+    const bpftrace_mapper::BpftraceRenderOptions cppOpts = ToCppBpfTraceRenderOptions(Opts);
+
+    std::string result =
+            bpftrace_mapper::BuildBpftraceUprobeScript(cppResolvedSymbols, cppOpts);
+
     if (result.empty())
         return nullptr;
 
