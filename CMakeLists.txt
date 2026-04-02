@@ -96,3 +96,14 @@ add_executable(mock
 )
 
 target_link_libraries(mock PRIVATE mock_lib)
+
+add_executable(mock_static_func
+  test/mock_static_func.c
+)
+
+target_compile_options(mock_static_func PRIVATE
+  -O0
+  -g
+  -fno-omit-frame-pointer
+  -fno-inline
+)

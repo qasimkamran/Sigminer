@@ -24,6 +24,26 @@ static llvm::DWARFDie GetTargetSubprogramInUnit(const llvm::DWARFDie& cuDie, std
     return {};
 }
 
+static llvm::DWARFDie GetTargetSubprogramInTree(const llvm::DWARFDie& die, std::string_view funcName)
+{
+    if (!die)
+        return {};
+
+    if (die.getTag() == llvm::dwarf::DW_TAG_subprogram) {
+        const char* name = die.getShortName();
+        if (name && funcName == name)
+            return die;
+    }
+
+    for (llvm::DWARFDie child : die.children()) {
+        llvm::DWARFDie subprogramDie = GetTargetSubprogramInTree(child, funcName);
+        if (subprogramDie)
+            return subprogramDie;
+    }
+
+    return {};
+}
+
 llvm::DWARFDie GetTargetSubprogram(llvm::DWARFContext& dwarfContext, std::string_view funcName)
 {
     for (const std::unique_ptr<llvm::DWARFUnit>& cu : dwarfContext.compile_units()) {
@@ -32,6 +52,10 @@ llvm::DWARFDie GetTargetSubprogram(llvm::DWARFContext& dwarfContext, std::string
             continue;
 
         llvm::DWARFDie subprogramDie = GetTargetSubprogramInUnit(cuDie, funcName);
+        if (subprogramDie)
+            return subprogramDie;
+
+        subprogramDie = GetTargetSubprogramInTree(cuDie, funcName);
         if (subprogramDie)
             return subprogramDie;
     }
