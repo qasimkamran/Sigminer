@@ -81,13 +81,12 @@ ReturnCode ToCReturnCode(sigminer::ReturnCode code)
 
 std::vector<sigminer::TypeEntry> ToCppTypeEntryVector(const TypeEntry* params, size_t paramsList)
 {
-    std::vector<sigminer::TypeEntry> cppParams(paramsList);
-    for (int i=0; i<paramsList; ++i) {
-        if (params[i].Kind == PRIMITIVE_KIND_UNKNOWN)
-            cppParams.emplace_back(params[i]);
-        else
-            cppParams.emplace_back();
-    }
+    std::vector<sigminer::TypeEntry> cppParams;
+    cppParams.reserve(paramsList);
+
+    for (size_t i = 0; i < paramsList; ++i)
+        cppParams.emplace_back(params[i]);
+
     return cppParams;
 }
 
