@@ -123,6 +123,7 @@ if(BUILD_TESTING)
         test/integration/dwarf_session_test.cpp
         test/unit/bpftrace_mapper_test.cpp
         test/unit/printf_specifier_mapper_test.cpp
+        test/unit/sigminer_c_test.cpp
     )
 
     target_include_directories(sigminer_tests

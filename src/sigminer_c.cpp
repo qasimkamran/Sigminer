@@ -256,6 +256,109 @@ Result SIGMINER_GetSignatureFromSharedObjectBySymbol(
     return result;
 }
 
+Result SIGMINER_FindSignatureInModulesBySymbol(
+        const char* const* modulePaths,
+        size_t modulePathCount,
+        const char* symbol,
+        BpftraceResolvedSymbol* resolved)
+{
+    Result result{};
+    result.RetCode = RETURN_CODE_INTERNAL_FAILURE;
+
+    if (modulePaths == nullptr || modulePathCount == 0 || symbol == nullptr) {
+        result.RetCode = RETURN_CODE_INVALID_INPUT;
+        return result;
+    }
+
+    std::vector<std::string> cppModulePaths;
+    cppModulePaths.reserve(modulePathCount);
+
+    for (size_t i = 0; i < modulePathCount; ++i) {
+        if (modulePaths[i] == nullptr) {
+            result.RetCode = RETURN_CODE_INVALID_INPUT;
+            return result;
+        }
+
+        cppModulePaths.emplace_back(modulePaths[i]);
+    }
+
+    bpftrace_mapper::BpftraceResolvedSymbol cppResolved{};
+    sigminer::Result cppResult =
+            bpftrace_mapper::FindSignatureInModulesBySymbol(cppModulePaths, symbol, &cppResolved);
+    result.RetCode = ToCReturnCode(cppResult.retCode);
+
+    if (!cppResult.sig)
+        return result;
+
+    ZeroSignature(&result.Sig);
+    result.Sig.HasVarArgs = cppResult.sig->hasVarArgs;
+
+    if (!CopyTypeEntry(cppResult.sig->ret, &result.Sig.Ret)) {
+        SIGMINER_FreeResult(&result);
+        result.RetCode = RETURN_CODE_INTERNAL_FAILURE;
+        return result;
+    }
+
+    result.Sig.ParamCount = cppResult.sig->params.size();
+    if (result.Sig.ParamCount != 0) {
+        result.Sig.Params = static_cast<TypeEntry*>(
+                std::calloc(result.Sig.ParamCount, sizeof(TypeEntry)));
+        if (result.Sig.Params == nullptr) {
+            SIGMINER_FreeResult(&result);
+            result.RetCode = RETURN_CODE_INTERNAL_FAILURE;
+            return result;
+        }
+
+        for (size_t i = 0; i < result.Sig.ParamCount; ++i) {
+            if (!CopyTypeEntry(cppResult.sig->params[i], &result.Sig.Params[i])) {
+                SIGMINER_FreeResult(&result);
+                result.RetCode = RETURN_CODE_INTERNAL_FAILURE;
+                return result;
+            }
+        }
+    }
+
+    if (resolved != nullptr) {
+        resolved->Target.ModulePath = DuplicateCString(cppResolved.target.modulePath);
+        resolved->Target.Symbol = DuplicateCString(cppResolved.target.symbol);
+        ZeroSignature(&resolved->Sig);
+        resolved->Sig.HasVarArgs = cppResolved.sig.hasVarArgs;
+
+        if ((resolved->Target.ModulePath == nullptr && !cppResolved.target.modulePath.empty()) ||
+            (resolved->Target.Symbol == nullptr && !cppResolved.target.symbol.empty()) ||
+            !CopyTypeEntry(cppResolved.sig.ret, &resolved->Sig.Ret)) {
+            SIGMINER_FreeBpftraceResolvedSymbol(resolved);
+            SIGMINER_FreeResult(&result);
+            result.RetCode = RETURN_CODE_INTERNAL_FAILURE;
+            return result;
+        }
+
+        resolved->Sig.ParamCount = cppResolved.sig.params.size();
+        if (resolved->Sig.ParamCount != 0) {
+            resolved->Sig.Params = static_cast<TypeEntry*>(
+                    std::calloc(resolved->Sig.ParamCount, sizeof(TypeEntry)));
+            if (resolved->Sig.Params == nullptr) {
+                SIGMINER_FreeBpftraceResolvedSymbol(resolved);
+                SIGMINER_FreeResult(&result);
+                result.RetCode = RETURN_CODE_INTERNAL_FAILURE;
+                return result;
+            }
+
+            for (size_t i = 0; i < resolved->Sig.ParamCount; ++i) {
+                if (!CopyTypeEntry(cppResolved.sig.params[i], &resolved->Sig.Params[i])) {
+                    SIGMINER_FreeBpftraceResolvedSymbol(resolved);
+                    SIGMINER_FreeResult(&result);
+                    result.RetCode = RETURN_CODE_INTERNAL_FAILURE;
+                    return result;
+                }
+            }
+        }
+    }
+
+    result.HasSignature = true;
+    return result;
+}
+
 void SIGMINER_FreeSignature(Signature* sig)
 {
     if (sig == nullptr)
@@ -273,6 +376,20 @@ void SIGMINER_FreeSignature(Signature* sig)
     ZeroSignature(sig);
 }
 
+void SIGMINER_FreeBpftraceResolvedSymbol(BpftraceResolvedSymbol* resolved)
+{
+    if (resolved == nullptr)
+        return;
+
+    SIGMINER_FreeSignature(&resolved->Sig);
+
+    std::free(const_cast<char*>(resolved->Target.ModulePath));
+    resolved->Target.ModulePath = nullptr;
+
+    std::free(const_cast<char*>(resolved->Target.Symbol));
+    resolved->Target.Symbol = nullptr;
+}
+
 void SIGMINER_FreeResult(Result* res)
 {
     if (res == nullptr)
@@ -281,6 +398,11 @@ void SIGMINER_FreeResult(Result* res)
     SIGMINER_FreeSignature(&res->Sig);
     res->HasSignature = false;
     res->RetCode = RETURN_CODE_SUCCESS;
+}
+
+void SIGMINER_FreeCString(const char* str)
+{
+    std::free(const_cast<char*>(str));
 }
 
 const char* SIGMINER_TypeEntryToPrintfSpecifier(const TypeEntry* typeEntry)
