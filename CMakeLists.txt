@@ -62,7 +62,7 @@ target_compile_definitions(proto PRIVATE ${LLVM_DEFINITIONS})
 target_link_libraries(proto PRIVATE sigminer)
 
 add_executable(bpftrace
-  test/bpftrace.cpp
+  test/integration/bpftrace_probe_runner.cpp
 )
 
 target_include_directories(bpftrace
@@ -77,7 +77,7 @@ target_compile_definitions(bpftrace PRIVATE ${LLVM_DEFINITIONS})
 target_link_libraries(bpftrace PRIVATE sigminer)
 
 add_library(mock_lib SHARED
-  test/mock_lib.c
+  test/fixture/mock_lib.c
 )
 
 set_target_properties(mock_lib PROPERTIES
@@ -92,13 +92,13 @@ target_compile_options(mock_lib PRIVATE
 )
 
 add_executable(mock
-  test/mock_live.cpp
+  test/fixture/mock_live.cpp
 )
 
 target_link_libraries(mock PRIVATE mock_lib)
 
 add_executable(mock_static_func
-  test/mock_static_func.c
+  test/fixture/mock_static_func.c
 )
 
 target_compile_options(mock_static_func PRIVATE
@@ -107,3 +107,65 @@ target_compile_options(mock_static_func PRIVATE
   -fno-omit-frame-pointer
   -fno-inline
 )
+
+add_library(dwarf_fixture_lib SHARED
+  test/fixture/dwarf_types_fixture.cpp
+)
+
+set_target_properties(dwarf_fixture_lib PROPERTIES
+  OUTPUT_NAME dwarf_fixture_lib
+)
+
+target_compile_options(dwarf_fixture_lib PRIVATE
+  -O0
+  -g
+  -fno-omit-frame-pointer
+  -fno-inline
+)
+
+include(CTest)
+
+if(BUILD_TESTING)
+    include(FetchContent)
+
+    FetchContent_Declare(
+        googletest
+        URL https://github.com/google/googletest/archive/refs/tags/v1.17.0.zip
+    )
+    FetchContent_MakeAvailable(googletest)
+
+    add_executable(sigminer_tests
+        test/integration/dwarf_session_test.cpp
+        test/unit/bpftrace_mapper_test.cpp
+        test/unit/printf_specifier_mapper_test.cpp
+        test/unit/signature_builder_test.cpp
+        test/unit/sigminer_c_test.cpp
+        test/unit/subprogram_finder_test.cpp
+        test/unit/type_classifier_test.cpp
+        test/unit/type_resolver_test.cpp
+    )
+
+    target_include_directories(sigminer_tests
+        PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${LLVM_INCLUDE_DIRS}
+    )
+
+    target_compile_definitions(sigminer_tests PRIVATE ${LLVM_DEFINITIONS})
+
+    target_link_libraries(sigminer_tests
+        PRIVATE
+        sigminer
+        GTest::gtest_main
+    )
+
+    add_dependencies(sigminer_tests
+        dwarf_fixture_lib
+        mock_lib
+    )
+
+    include(GoogleTest)
+    gtest_discover_tests(sigminer_tests)
+endif()
