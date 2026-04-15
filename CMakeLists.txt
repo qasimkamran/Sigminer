@@ -121,6 +121,7 @@ if(BUILD_TESTING)
 
     add_executable(sigminer_tests
         test/integration/dwarf_session_test.cpp
+        test/unit/bpftrace_mapper_test.cpp
         test/unit/printf_specifier_mapper_test.cpp
     )
 
