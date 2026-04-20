@@ -103,6 +103,8 @@ int main(int argc, char* argv[])
         return 6;
     if (CheckScript(argv[1], "SumTraceNodeByValue", "reg(\"sp\") + 8") != 0)
         return 7;
+    if (CheckScript(argv[1], "SumSmallTraceByValue", "reg(\"si\")") != 0)
+        return 8;
 
     return 0;
 }

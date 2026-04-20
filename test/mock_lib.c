@@ -14,6 +14,12 @@ struct TraceNode
     struct TraceLeaf leaf;
 };
 
+struct SmallTrace
+{
+    int count;
+    const char* label;
+};
+
 static volatile uint64_t g_live_total = 0;
 
 static uint64_t TickLane(int lane, int cycle, uint64_t seed)
@@ -107,4 +113,13 @@ __attribute__((noinline, visibility("default")))
 int SumTraceNodeByValue(struct TraceNode node)
 {
     return node.count + node.leaf.value;
+}
+
+__attribute__((noinline, visibility("default")))
+int SumSmallTraceByValue(struct SmallTrace trace)
+{
+    if (trace.label == NULL)
+        return trace.count;
+
+    return trace.count + (int)trace.label[0];
 }
