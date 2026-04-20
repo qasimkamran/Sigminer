@@ -95,11 +95,11 @@ int main(int argc, char* argv[])
     SIGMINER_FreeCString(shallowScript);
     SIGMINER_FreeResult(&shallow);
 
-    if (CheckScript(argv[1], "CountString", "str(uptr((char*)$ptr))") != 0)
+    if (CheckScript(argv[1], "CountString", "str(uptr($arg0__text__ptr))") != 0)
         return 4;
-    if (CheckScript(argv[1], "DerefInt", "uptr((int32*)$ptr)") != 0)
+    if (CheckScript(argv[1], "DerefInt", "uptr((int32*)($arg0__value__ptr))") != 0)
         return 5;
-    if (CheckScript(argv[1], "SumTraceNode", "struct TraceNode {") != 0)
+    if (CheckScript(argv[1], "SumTraceNode", "($arg0__node__ptr + 8)") != 0)
         return 6;
 
     return 0;

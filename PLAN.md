@@ -88,6 +88,13 @@ Keep the old shallow mapper behavior for the default case, and add a second rend
 - aggregate member printing
 - bounded array expansion
 
+After validating the first typed-aggregate approach, the plan was revised to remove the dependency on `bpftrace` DWARF support for aggregate decoding:
+
+- do not tell `bpftrace` about `struct Foo` and access `.field`
+- use Sigminer to read DWARF offline
+- compute exact member offsets and field kinds in Sigminer
+- generate `bpftrace` code that reads raw user memory at `base_ptr + offset`
+
 ### How It Was Implemented
 
 The rich renderer was added in:
@@ -112,13 +119,21 @@ Implemented rendering behavior:
 - `char *` and `const char *` render through `str(uptr(...))`
 - pointer-to-primitive prints the pointer address and dereferenced value
 - pointer-to-aggregate prints the pointer address and recursively expanded fields
-- aggregate-by-value arguments are expanded when the probe form makes that possible
+- aggregate-by-value arguments currently fall back to explicit unsupported output
 - arrays are handled in a limited way, with special handling for string-like arrays
 - unsupported or truncated cases fall back to explicit labeled output
 
-Compatibility work done while making this actually run on the installed `bpftrace`:
+The implementation was then changed to an offset-based renderer:
 
-- switched generated aggregate preambles to C-compatible type names
+- aggregate member access is generated as reads from `base_ptr + member.offset`
+- pointer fields are read as pointer-sized integers from `base_ptr + member.offset`
+- string fields are rendered by reading the pointer value, then calling `str(uptr(...))`
+- nested aggregate fields recurse by carrying forward the computed base address
+- simple scalar fields are read through primitive typed loads at the computed address
+
+Compatibility work done while making this run on installed `bpftrace` builds:
+
+- removed the need for generated aggregate preambles in the final renderer
 - stopped reusing scratch variables across different typed values
 - replaced pointer truthiness checks with explicit `!= 0`
 
@@ -126,20 +141,19 @@ Compatibility work done while making this actually run on the installed `bpftrac
 
 ### Plan Followed
 
-Emit only the aggregate declarations required by the rich-rendered values, in a form `bpftrace` can parse and use for field access.
+The original typed-aggregate approach required generated aggregate declarations so `bpftrace` could access fields directly. After validating the environment, the plan was revised to remove this dependency and instead render aggregates through raw offset-based memory reads.
 
 ### How It Was Implemented
 
-The rich renderer now generates aggregate definitions before the probe blocks.
+The final renderer no longer depends on aggregate preambles for the rich path.
 
-Behavior:
+Instead:
 
-- referenced aggregate types are collected recursively
-- each aggregate is emitted once
-- unnamed types are sanitized into deterministic generated names
-- declarations are intentionally minimal and focused on field access compatibility
+- Sigminer keeps the aggregate/member DWARF metadata offline
+- the generated script reads primitive and pointer fields directly from computed offsets
+- nested members recurse through offset arithmetic rather than `.field` access
 
-This branch does not attempt full source-level reconstruction of the original C/C++ type definitions.
+This change was made specifically to reduce dependence on `bpftrace` builds having `libdw`.
 
 ## 5. ABI and Ownership Strategy
 
@@ -204,7 +218,7 @@ The main checks now prove:
 - the shallow path stays shallow
 - string pointers generate `str(uptr(...))`
 - primitive pointers generate typed dereference code
-- aggregate pointers generate aggregate preambles and field expansion
+- aggregate pointers generate offset-based raw reads and field expansion
 
 ## 7. What Was Left Unimplemented
 
@@ -221,6 +235,7 @@ Items intentionally left incomplete or partial:
 - no rich bulk resolved-symbol script builder was added alongside the shallow bulk builder
 - no broad compatibility matrix was added for unions, typedef-heavy layouts, or nested array-heavy types
 - no automated end-to-end runtime validation was added across multiple `bpftrace` versions
+- aggregate-by-value rich decoding is still limited
 - fallback behavior is practical for the study but not polished as a final product surface
 
 ## 8. Outcome
@@ -235,6 +250,7 @@ This branch demonstrates:
 
 - rich DWARF extraction is workable in parallel with the existing shallow path
 - richer `bpftrace` script generation is practical
+- aggregate decoding can be driven from Sigminer’s offline DWARF view rather than `bpftrace`’s DWARF parser
 - live decoding works for:
   - string pointers
   - primitive pointers
