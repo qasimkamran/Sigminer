@@ -95,6 +95,12 @@ After validating the first typed-aggregate approach, the plan was revised to rem
 - compute exact member offsets and field kinds in Sigminer
 - generate `bpftrace` code that reads raw user memory at `base_ptr + offset`
 
+After validating the offset-based aggregate approach, the plan was revised again to remove the remaining dependence on `bpftrace` DWARF for argument discovery:
+
+- do not rely on `arg0`, `arg1`, ... for rich uprobe arguments
+- capture arguments from the platform calling convention directly
+- use x86_64 SysV integer/pointer argument registers first, then user stack slots
+
 ### How It Was Implemented
 
 The rich renderer was added in:
@@ -130,6 +136,13 @@ The implementation was then changed to an offset-based renderer:
 - string fields are rendered by reading the pointer value, then calling `str(uptr(...))`
 - nested aggregate fields recurse by carrying forward the computed base address
 - simple scalar fields are read through primitive typed loads at the computed address
+
+The implementation was then extended to a register-based rich argument capture path:
+
+- rich uprobe arguments are no longer sourced from `argN`
+- the first six integer/pointer arguments are sourced from `reg("di")`, `reg("si")`, `reg("dx")`, `reg("cx")`, `reg("r8")`, and `reg("r9")`
+- later integer/pointer arguments are sourced from user stack slots via `reg("sp")`
+- float argument capture is currently left unsupported in the register-based path
 
 Compatibility work done while making this run on installed `bpftrace` builds:
 
@@ -251,6 +264,7 @@ This branch demonstrates:
 - rich DWARF extraction is workable in parallel with the existing shallow path
 - richer `bpftrace` script generation is practical
 - aggregate decoding can be driven from Sigminer’s offline DWARF view rather than `bpftrace`’s DWARF parser
+- rich uprobe argument capture can be driven from the calling convention rather than `argN`
 - live decoding works for:
   - string pointers
   - primitive pointers

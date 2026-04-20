@@ -95,7 +95,7 @@ int main(int argc, char* argv[])
     SIGMINER_FreeCString(shallowScript);
     SIGMINER_FreeResult(&shallow);
 
-    if (CheckScript(argv[1], "CountString", "str(uptr($arg0__text__ptr))") != 0)
+    if (CheckScript(argv[1], "CountString", "reg(\"di\")") != 0)
         return 4;
     if (CheckScript(argv[1], "DerefInt", "uptr((int32*)($arg0__value__ptr))") != 0)
         return 5;

@@ -134,6 +134,34 @@ std::string BuildAddressOffsetExpr(const std::string& baseExpr, std::size_t offs
     return "(" + baseExpr + " + " + std::to_string(offset) + ")";
 }
 
+bool IsFloatLike(const sigminer::RichTypeEntry& type)
+{
+    return type.kind == sigminer::PrimitiveKind::FLOAT;
+}
+
+std::string BuildRichArgumentExpr(
+        const sigminer::RichTypeEntry& type,
+        std::size_t index,
+        bool* supported)
+{
+    static const char* kIntArgRegs[] = { "di", "si", "dx", "cx", "r8", "r9" };
+
+    if (supported)
+        *supported = true;
+
+    if (IsFloatLike(type)) {
+        if (supported)
+            *supported = false;
+        return {};
+    }
+
+    if (index < (sizeof(kIntArgRegs) / sizeof(kIntArgRegs[0])))
+        return "reg(\"" + std::string(kIntArgRegs[index]) + "\")";
+
+    const std::size_t stackOffset = 8 * (index - 5);
+    return "*(uptr((uint64*)(reg(\"sp\") + " + std::to_string(stackOffset) + ")))";
+}
+
 void AppendLine(std::string& out, std::size_t depth, const std::string& line)
 {
     out += Indent(depth) + line + "\n";
@@ -532,7 +560,16 @@ std::string BuildRichArgumentPrintExpr(
     std::string out;
     for (std::size_t i = 0; i < sig.params.size(); ++i) {
         const sigminer::RichParameter& param = sig.params[i];
-        std::string expr = "arg" + std::to_string(i);
+        bool supported = false;
+        const std::string expr = BuildRichArgumentExpr(param.type, i, &supported);
+        if (!supported) {
+            AppendPrintf(
+                    out,
+                    1,
+                    "arg" + std::to_string(i) + " (" + param.name +
+                            "): <unsupported calling convention capture>");
+            continue;
+        }
         RenderRichValue(out, param.type, expr, "arg" + std::to_string(i) + " (" + param.name + ")", opts, 1, 0);
     }
     return out;
