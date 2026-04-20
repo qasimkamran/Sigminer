@@ -1,34 +1,99 @@
-# Rich Value Decoding Feasibility Study
+# Rich Value Decoding in Sigminer
 
-## Summary
+## 1. Problem
 
-This branch was implemented as a feasibility study for richer `bpftrace` output generation in Sigminer.
+The original `bpftrace` script generation in Sigminer only printed flat values:
 
-Primary goal:
+- primitive arguments were printed directly
+- pointers were mostly printed as addresses
+- aggregates were not decoded into member values
 
-- decode pointers and aggregates into meaningful printed values instead of only printing raw addresses
+That meant output like:
 
-Constraints we followed:
+- `arg0: 0x7f...`
+- `arg1: 0x7f...`
 
-- keep the current shallow type/signature path intact for speed and low complexity
-- add richer behavior through a separate opt-in path
-- validate the approach with concrete mock symbols and generated-script checks
+instead of:
 
-## 1. Dual-Mode Type Metadata
+- a pointer to string being rendered as the pointed-to string
+- a pointer to primitive being rendered as address plus dereferenced value
+- an aggregate being rendered member-by-member
 
-### Plan Followed
+The first idea was to solve this by generating richer typed `bpftrace` scripts and letting `bpftrace` itself do aggregate field access.
 
-Keep the existing cutdown `TypeEntry` model for the fast path and introduce a separate recursive rich model that can carry:
+That ran into a fundamental environment problem:
 
-- pointee information
+- the target machines used `bpftrace` builds without `libdw`
+- those builds could not consume DWARF for user-space type-driven field access
+- even where the target `.so` had valid `.debug_info`, `bpftrace` could not use it
+
+So the real problem became:
+
+- Sigminer can read DWARF
+- but the generated tracing path must not depend on `bpftrace` having DWARF support
+
+## 2. Changes Required
+
+To solve that properly, the implementation needed to do more than just tweak printing.
+
+### 2.1 Rich Type Information in Sigminer
+
+Sigminer needed a richer internal type model than the old shallow `TypeEntry`:
+
+- pointee type information
 - aggregate member lists
-- array metadata
+- member offsets
+- array element information
 - parameter names
 - string-like classification
 
-### How It Was Implemented
+Without this, Sigminer could not know what to print for pointers or how to decode aggregate layouts.
 
-The shallow types were left in place and a parallel rich model was added in:
+### 2.2 A Separate Rich Extraction Path
+
+The existing shallow signature path was useful and cheap. It should not be replaced wholesale.
+
+So a separate rich extraction path was needed:
+
+- keep shallow lookup for fast/basic usage
+- add rich signature extraction only when nicer output is requested
+
+### 2.3 A Renderer That Does Not Depend on bpftrace DWARF
+
+The original typed approach would have required:
+
+- generated `struct` definitions
+- `bpftrace` field access like `.field`
+- `bpftrace` understanding DWARF and typed user-space layouts
+
+That was not viable on the real target environment.
+
+So the renderer needed to change to:
+
+- use Sigminer’s offline DWARF understanding
+- compute field offsets in Sigminer
+- emit raw `bpftrace` memory reads at `base_ptr + offset`
+- recurse through nested aggregates using addresses and offsets only
+
+### 2.4 An ABI Layer for Argument Capture
+
+Even after removing typed aggregate access, one more dependency remained:
+
+- `bpftrace` argument access via `arg0`, `arg1`, ... can itself depend on DWARF in some uprobe setups
+
+So the renderer also needed to stop relying on `argN` for rich decoding and instead capture arguments directly from the platform ABI:
+
+- register-based capture for integer/pointer args
+- stack-based capture for spilled args
+- special handling for by-value aggregates
+
+## 3. What Was Implemented
+
+### 3.1 Dual-Mode Type Model
+
+The shallow type/signature model was preserved.
+
+A parallel rich model was added in:
 
 - `include/sigminer/signature.h`
 - `include/sigminer/sigminer_c.h`
@@ -41,233 +106,203 @@ Added rich types:
 - `RichSignature`
 - `RichResult`
 
-The shallow API still backs the old lightweight flow. The rich API is separate and only used when richer decoding is requested.
+This gives Sigminer enough offline information to decode pointees and aggregate layouts without making the old API heavier.
 
-## 2. Rich Signature Extraction
+### 3.2 Rich DWARF Extraction
 
-### Plan Followed
-
-Add a dedicated rich-signature extraction path instead of forcing the existing shallow signature lookup to always build a recursive DWARF type graph.
-
-### How It Was Implemented
-
-New rich extraction APIs were added in:
-
-- `include/sigminer/sigminer.h`
-- `include/sigminer/sigminer_c.h`
-- `src/sigminer.cpp`
-- `src/sigminer_c.cpp`
-
-New entry points:
+A dedicated rich extraction path was added:
 
 - `GetRichSignatureFromSharedObjectBySymbol(...)`
 - `SIGMINER_GetRichSignatureFromSharedObjectBySymbol(...)`
 
-Rich extraction logic was implemented in:
+Implemented in:
 
 - `src/signature_builder.cpp`
+- `src/sigminer.cpp`
+- `src/sigminer_c.cpp`
 
-Current rich extraction behavior:
+What it captures:
 
-- recursively resolves pointee types
-- recursively resolves struct/class/union members
-- captures fixed array counts where DWARF exposes them
-- captures parameter names from `DW_TAG_formal_parameter`
-- marks `char *` and `char[N]` as string-like
-- uses recursion depth and active-DIE tracking to stop cycles
+- pointee type graphs
+- aggregate members and offsets
+- fixed array counts where available
+- parameter names
+- string-like `char*` / `char[N]`
+- recursion/cycle stopping
 
-## 3. Rich bpftrace Rendering
+### 3.3 Rich Script Builder
 
-### Plan Followed
+The rich script builder was added alongside the shallow one:
 
-Keep the old shallow mapper behavior for the default case, and add a second renderer that emits richer `bpftrace` code for:
+- `BuildRichBpftraceUprobeScript(...)`
+- `SIGMINER_BuildRichBpftraceUprobeScriptForTarget(...)`
 
-- string pointers
-- pointer-to-primitive dereference
-- pointer-to-aggregate expansion
-- aggregate member printing
-- bounded array expansion
-
-After validating the first typed-aggregate approach, the plan was revised to remove the dependency on `bpftrace` DWARF support for aggregate decoding:
-
-- do not tell `bpftrace` about `struct Foo` and access `.field`
-- use Sigminer to read DWARF offline
-- compute exact member offsets and field kinds in Sigminer
-- generate `bpftrace` code that reads raw user memory at `base_ptr + offset`
-
-After validating the offset-based aggregate approach, the plan was revised again to remove the remaining dependence on `bpftrace` DWARF for argument discovery:
-
-- do not rely on `arg0`, `arg1`, ... for rich uprobe arguments
-- capture arguments from the platform calling convention directly
-- use x86_64 SysV integer/pointer argument registers first, then user stack slots
-
-### How It Was Implemented
-
-The rich renderer was added in:
+Implemented in:
 
 - `src/internal/bpftrace_mapper.h`
 - `src/bpftrace_mapper.cpp`
 
-The options surface was extended with:
+Render options were extended with:
 
 - `EnableRichTypePrinting`
 - `MaxAggregateDepth`
 - `MaxAggregateMembers`
 - `MaxArrayElements`
 
-New rich builder entry points:
+### 3.4 Offset-Based Aggregate Decoding
 
-- `BuildRichBpftraceUprobeScript(...)`
-- `SIGMINER_BuildRichBpftraceUprobeScriptForTarget(...)`
+The first implementation attempted typed aggregate rendering through generated declarations and direct field access.
 
-Implemented rendering behavior:
+That was replaced with the final strategy:
 
-- `char *` and `const char *` render through `str(uptr(...))`
-- pointer-to-primitive prints the pointer address and dereferenced value
-- pointer-to-aggregate prints the pointer address and recursively expanded fields
-- aggregate-by-value arguments currently fall back to explicit unsupported output
-- arrays are handled in a limited way, with special handling for string-like arrays
-- unsupported or truncated cases fall back to explicit labeled output
+- no aggregate preambles are required for the final rich path
+- aggregate members are rendered from `base_ptr + member.offset`
+- primitive fields are read from typed loads at the computed address
+- pointer fields are read as pointer-sized integers at the computed address
+- string fields are rendered by reading the pointer then calling `str(uptr(...))`
+- nested aggregates recurse by advancing the base address
 
-The implementation was then changed to an offset-based renderer:
+This moved aggregate understanding fully into Sigminer and out of `bpftrace`’s DWARF parser.
 
-- aggregate member access is generated as reads from `base_ptr + member.offset`
-- pointer fields are read as pointer-sized integers from `base_ptr + member.offset`
-- string fields are rendered by reading the pointer value, then calling `str(uptr(...))`
-- nested aggregate fields recurse by carrying forward the computed base address
-- simple scalar fields are read through primitive typed loads at the computed address
+### 3.5 ABI-Based Argument Capture
 
-The implementation was then extended to a register-based rich argument capture path:
+The rich path no longer relies on `arg0`, `arg1`, ... for its main decoding logic.
 
-- rich uprobe arguments are no longer sourced from `argN`
-- the first six integer/pointer arguments are sourced from `reg("di")`, `reg("si")`, `reg("dx")`, `reg("cx")`, `reg("r8")`, and `reg("r9")`
-- later integer/pointer arguments are sourced from user stack slots via `reg("sp")`
-- float argument capture is currently left unsupported in the register-based path
+Instead, for x86_64 SysV:
 
-Compatibility work done while making this run on installed `bpftrace` builds:
+- integer/pointer args 0-5 are captured from:
+  - `reg("di")`
+  - `reg("si")`
+  - `reg("dx")`
+  - `reg("cx")`
+  - `reg("r8")`
+  - `reg("r9")`
+- later integer/pointer args are captured from stack slots based on `reg("sp")`
 
-- removed the need for generated aggregate preambles in the final renderer
-- stopped reusing scratch variables across different typed values
-- replaced pointer truthiness checks with explicit `!= 0`
+This was required to keep rich decoding working even when `bpftrace` argument discovery via DWARF was unavailable.
 
-## 4. Generated Aggregate Preambles
+### 3.6 Aggregate ABI Handling
 
-### Plan Followed
+By-value aggregates needed separate ABI handling.
 
-The original typed-aggregate approach required generated aggregate declarations so `bpftrace` could access fields directly. After validating the environment, the plan was revised to remove this dependency and instead render aggregates through raw offset-based memory reads.
+Implemented cases:
 
-### How It Was Implemented
+- large memory-passed by-value aggregates:
+  - treated as stack-backed memory
+  - decoded by field offset from the stack address
 
-The final renderer no longer depends on aggregate preambles for the rich path.
+- small non-float by-value aggregates up to 16 bytes on x86_64 SysV:
+  - treated as register-backed aggregates
+  - split into 8-byte ABI slots
+  - fields decoded from those register slots by offset
 
-Instead:
+This was the missing ABI layer needed for cases where a by-value aggregate was not a simple pointer and not memory-passed.
 
-- Sigminer keeps the aggregate/member DWARF metadata offline
-- the generated script reads primitive and pointer fields directly from computed offsets
-- nested members recurse through offset arithmetic rather than `.field` access
+### 3.7 qk_eBPFTest Integration
 
-This change was made specifically to reduce dependence on `bpftrace` builds having `libdw`.
+`qk_eBPFTest.c` was updated to use the rich API:
 
-## 5. ABI and Ownership Strategy
+- rich signature lookup
+- rich script builder
+- rich render options
 
-### Plan Followed
+It was also updated to allow the `bpftrace` binary to be overridden through:
 
-Avoid inflating the existing shallow public ABI. Add new rich structs and APIs rather than turning the old `TypeEntry`/`Signature` path into a recursive ownership graph.
+- `BPFTRACE_PATH`
 
-### How It Was Implemented
+This was necessary because the real environment required testing with a rebuilt `bpftrace` rather than the hardcoded system one.
 
-The rich C ABI was added in:
+## 4. Why Each Choice Was Made
 
-- `include/sigminer/sigminer_c.h`
-- `src/sigminer_c.cpp`
+### 4.1 Why Keep a Shallow Path?
 
-Implemented support:
+Because the original shallow API is still valuable:
 
-- shallow-to-rich and rich-to-C conversion paths
-- recursive copy/allocation logic for rich types
-- recursive free logic for rich types and signatures
-- `SIGMINER_FreeCString(...)` implementation for returned script strings
+- less complexity
+- less DWARF traversal
+- useful for quick/basic output
 
-The old shallow API remains available and unchanged in behavior.
+The richer path is more expensive and more specialized, so it should remain opt-in.
 
-## 6. Mock Validation and Feasibility Checks
+### 4.2 Why Not Let bpftrace Decode Structs Directly?
 
-### Plan Followed
+Because the real target environment showed this was not dependable:
 
-Validate the approach with concrete mock functions that exercise the main target cases:
+- valid embedded DWARF existed in the target library
+- the installed `bpftrace` still could not use it due to missing `libdw`
 
-- string pointers
-- primitive pointers
-- aggregate pointers
+So a direct typed-field approach would fail in exactly the environments where the feature was needed.
 
-### How It Was Implemented
+### 4.3 Why Move Decoding Into Sigminer?
 
-New mock symbols were added in:
+Because Sigminer already has the DWARF context needed to understand:
+
+- member offsets
+- nested layouts
+- pointee types
+- string-like fields
+
+Once Sigminer has that information, it can generate raw-memory reads and no longer depend on `bpftrace` for type interpretation.
+
+### 4.4 Why Add ABI Logic?
+
+Because removing typed aggregate access was not enough.
+
+The rich path also had to stop depending on `argN`, otherwise some environments would still indirectly require DWARF.
+
+Using the platform ABI makes rich decoding more self-contained:
+
+- arguments come from registers/stack
+- field decoding comes from Sigminer’s DWARF
+- `bpftrace` becomes a lower-level execution engine rather than the type engine
+
+## 5. Validation Performed
+
+Mock coverage was added and extended in:
 
 - `test/mock_lib.c`
-
-Added functions:
-
-- `DerefInt`
-- `CountString`
-- `SumTraceNode`
-
-The live mock driver was extended in:
-
 - `test/mock_live.cpp`
-
-It now continuously calls all three new symbols so the tracer can be attached directly to them.
-
-Script-generation regression coverage was added in:
-
 - `test/rich_bpftrace_mapper.cpp`
 
-Build integration was added in:
+Covered cases:
 
-- `CMakeLists.txt`
+- string pointers
+- pointer-to-primitive
+- pointer-to-aggregate
+- memory-passed by-value aggregate
+- small register-passed by-value aggregate
 
-The main checks now prove:
+The local verification path used:
 
-- the shallow path stays shallow
-- string pointers generate `str(uptr(...))`
-- primitive pointers generate typed dereference code
-- aggregate pointers generate offset-based raw reads and field expansion
+- `cmake --build build -j4`
+- `./build/rich_bpftrace_mapper ./build/libmock_lib.so`
 
-## 7. What Was Left Unimplemented
+## 6. Current Limitations
 
-### Plan Followed
+This branch is still a feasibility study, not a complete production implementation.
 
-Treat this branch as a feasibility study, not a fully hardened or complete final feature.
+Known gaps:
 
-### How It Was Left
+- float/SSE-class small aggregate ABI handling is still not implemented
+- fields that straddle 8-byte ABI slot boundaries are still not fully handled
+- aggregate return-by-value decoding is still limited
+- arrays are only partially exercised and hardened
+- no broad union/bitfield compatibility work has been added
+- no rich bulk resolved-symbol script builder has been added
+- no wide runtime compatibility matrix across `bpftrace` versions has been completed
 
-Items intentionally left incomplete or partial:
+## 7. Outcome
 
-- aggregate return-by-value rich decoding is not implemented
-- array rendering exists but is not broadly validated or hardened
-- no rich bulk resolved-symbol script builder was added alongside the shallow bulk builder
-- no broad compatibility matrix was added for unions, typedef-heavy layouts, or nested array-heavy types
-- no automated end-to-end runtime validation was added across multiple `bpftrace` versions
-- aggregate-by-value rich decoding is still limited
-- fallback behavior is practical for the study but not polished as a final product surface
+The branch now demonstrates a workable architecture for rich decoding that is much less dependent on `bpftrace`’s own DWARF support:
 
-## 8. Outcome
+- Sigminer reads DWARF offline
+- Sigminer computes layout and offsets
+- Sigminer generates raw-memory decode logic
+- the script captures arguments via the ABI rather than `argN`
 
-### Plan Followed
+In practical terms, this tackled the original problem by shifting responsibility:
 
-Demonstrate that Sigminer can support richer pointer and aggregate decoding without sacrificing the current shallow path.
+- from `bpftrace` as the type interpreter
+- to Sigminer as the type/layout engine
 
-### How It Was Achieved
-
-This branch demonstrates:
-
-- rich DWARF extraction is workable in parallel with the existing shallow path
-- richer `bpftrace` script generation is practical
-- aggregate decoding can be driven from Sigminer’s offline DWARF view rather than `bpftrace`’s DWARF parser
-- rich uprobe argument capture can be driven from the calling convention rather than `argN`
-- live decoding works for:
-  - string pointers
-  - primitive pointers
-  - aggregate pointers
-
-This branch should be read as a working exploration and implementation base, not the final end-state of the feature.
+That is the main result of this work, and the reason this approach is a stronger fit for the real target environment.
