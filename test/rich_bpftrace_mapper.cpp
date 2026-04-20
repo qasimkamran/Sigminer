@@ -101,6 +101,8 @@ int main(int argc, char* argv[])
         return 5;
     if (CheckScript(argv[1], "SumTraceNode", "($arg0__node__ptr + 8)") != 0)
         return 6;
+    if (CheckScript(argv[1], "SumTraceNodeByValue", "reg(\"sp\") + 8") != 0)
+        return 7;
 
     return 0;
 }

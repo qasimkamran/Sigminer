@@ -102,3 +102,9 @@ int SumTraceNode(const struct TraceNode* node)
 
     return node->count + node->leaf.value;
 }
+
+__attribute__((noinline, visibility("default")))
+int SumTraceNodeByValue(struct TraceNode node)
+{
+    return node.count + node.leaf.value;
+}

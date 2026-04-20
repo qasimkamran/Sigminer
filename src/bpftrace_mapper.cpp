@@ -141,7 +141,8 @@ bool IsFloatLike(const sigminer::RichTypeEntry& type)
 
 std::string BuildRichArgumentExpr(
         const sigminer::RichTypeEntry& type,
-        std::size_t index,
+        std::size_t regIndex,
+        std::size_t stackOffset,
         bool* supported)
 {
     static const char* kIntArgRegs[] = { "di", "si", "dx", "cx", "r8", "r9" };
@@ -155,11 +156,20 @@ std::string BuildRichArgumentExpr(
         return {};
     }
 
-    if (index < (sizeof(kIntArgRegs) / sizeof(kIntArgRegs[0])))
-        return "reg(\"" + std::string(kIntArgRegs[index]) + "\")";
+    if (regIndex < (sizeof(kIntArgRegs) / sizeof(kIntArgRegs[0])))
+        return "reg(\"" + std::string(kIntArgRegs[regIndex]) + "\")";
 
-    const std::size_t stackOffset = 8 * (index - 5);
     return "*(uptr((uint64*)(reg(\"sp\") + " + std::to_string(stackOffset) + ")))";
+}
+
+std::size_t RoundUpToEight(std::size_t value)
+{
+    return ((value + 7) / 8) * 8;
+}
+
+bool IsMemoryPassedAggregate(const sigminer::RichTypeEntry& type)
+{
+    return type.kind == sigminer::PrimitiveKind::AGGREGATE && type.size > 16;
 }
 
 void AppendLine(std::string& out, std::size_t depth, const std::string& line)
@@ -558,19 +568,41 @@ std::string BuildRichArgumentPrintExpr(
         return "  printf(\"    args: (none)\\n\");\n";
 
     std::string out;
+    std::size_t nextIntRegIndex = 0;
+    std::size_t nextStackOffset = 8;
     for (std::size_t i = 0; i < sig.params.size(); ++i) {
         const sigminer::RichParameter& param = sig.params[i];
+        const std::string label = "arg" + std::to_string(i) + " (" + param.name + ")";
+
+        if (param.type.kind == sigminer::PrimitiveKind::AGGREGATE) {
+            if (IsMemoryPassedAggregate(param.type)) {
+                const std::string addressExpr =
+                        "reg(\"sp\") + " + std::to_string(nextStackOffset);
+                RenderRichValueFromAddress(out, param.type, addressExpr, label, opts, 1, 0);
+                nextStackOffset += RoundUpToEight(param.type.size);
+            } else {
+                AppendPrintf(out, 1, label + ": <small by-value aggregate rendering unsupported>");
+            }
+            continue;
+        }
+
         bool supported = false;
-        const std::string expr = BuildRichArgumentExpr(param.type, i, &supported);
+        const std::string expr =
+                BuildRichArgumentExpr(param.type, nextIntRegIndex, nextStackOffset, &supported);
         if (!supported) {
             AppendPrintf(
                     out,
                     1,
-                    "arg" + std::to_string(i) + " (" + param.name +
-                            "): <unsupported calling convention capture>");
+                    label + ": <unsupported calling convention capture>");
             continue;
         }
-        RenderRichValue(out, param.type, expr, "arg" + std::to_string(i) + " (" + param.name + ")", opts, 1, 0);
+
+        if (nextIntRegIndex < 6)
+            ++nextIntRegIndex;
+        else
+            nextStackOffset += 8;
+
+        RenderRichValue(out, param.type, expr, label, opts, 1, 0);
     }
     return out;
 }
