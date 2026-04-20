@@ -60,11 +60,12 @@ int main(int argc, char* argv[])
         return 5;
     }
 
-    Result sig_result = SIGMINER_GetSignatureFromSharedObjectBySymbol(module_path.c_str(), symbol);
+    RichResult sig_result =
+            SIGMINER_GetRichSignatureFromSharedObjectBySymbol(module_path.c_str(), symbol);
     if (!sig_result.HasSignature) {
         std::cerr << "Error: symbol '" << symbol << "' was not found in '" << module_path
                   << "'. ReturnCode=" << sig_result.RetCode << '\n';
-        SIGMINER_FreeResult(&sig_result);
+        SIGMINER_FreeRichResult(&sig_result);
         return 6;
     }
 
@@ -81,11 +82,15 @@ int main(int argc, char* argv[])
             .IncludeUserStack = true,
             .IncludeArgumentPrinting = true,
             .IncludeReturnPrinting = true,
+            .EnableRichTypePrinting = true,
+            .MaxAggregateDepth = 2,
+            .MaxAggregateMembers = 16,
+            .MaxArrayElements = 8,
     };
 
     char* script = const_cast<char*>(
-            SIGMINER_BuildBpftraceUprobeScriptForTarget(&target, &sig_result.Sig, &opts));
-    SIGMINER_FreeResult(&sig_result);
+            SIGMINER_BuildRichBpftraceUprobeScriptForTarget(&target, &sig_result.Sig, &opts));
+    SIGMINER_FreeRichResult(&sig_result);
 
     if (script == nullptr) {
         std::cerr << "Error: failed to build bpftrace script.\n";

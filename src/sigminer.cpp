@@ -52,4 +52,48 @@ Result GetSignatureFromSharedObjectBySymbol(
     return result;
 }
 
+RichResult GetRichSignatureFromSharedObjectBySymbol(
+        const std::string& sharedObjectFilePath,
+        const std::string& symbol)
+{
+    RichResult result{};
+
+    if (sharedObjectFilePath.empty() || symbol.empty()) {
+        result.retCode = ReturnCode::INVALID_INPUT;
+        return result;
+    }
+
+    llvm::Expected<dwarf_session::Session> sessionOrErr = dwarf_session::Open(sharedObjectFilePath);
+    if (!sessionOrErr) {
+        const std::string error = llvm::toString(sessionOrErr.takeError());
+        if (error.find("object file") != std::string::npos) {
+            result.retCode = ReturnCode::INVALID_INPUT;
+        } else {
+            result.retCode = ReturnCode::FILE_OPEN_FAILURE;
+        }
+        return result;
+    }
+
+    dwarf_session::Session& session = *sessionOrErr;
+    if (!session.context) {
+        result.retCode = ReturnCode::DWARF_UNAVAILABLE;
+        return result;
+    }
+
+    llvm::DWARFDie subprogramDie = subprogram_finder::GetTargetSubprogram(*session.context, symbol);
+    if (!subprogramDie.isValid()) {
+        result.retCode = ReturnCode::SYMBOL_RESOLUTION_FAILURE;
+        return result;
+    }
+
+    if (!subprogramDie.isSubprogramDIE()) {
+        result.retCode = ReturnCode::FUNCTION_DIE_NOT_IN_RANGE;
+        return result;
+    }
+
+    result.sig = signature_builder::BuildRichSignature(subprogramDie);
+    result.retCode = ReturnCode::SUCCESS;
+    return result;
+}
+
 } // namespace sigminer

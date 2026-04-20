@@ -76,6 +76,21 @@ target_compile_definitions(bpftrace PRIVATE ${LLVM_DEFINITIONS})
 
 target_link_libraries(bpftrace PRIVATE sigminer)
 
+add_executable(rich_bpftrace_mapper
+  test/rich_bpftrace_mapper.cpp
+)
+
+target_include_directories(rich_bpftrace_mapper
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${LLVM_INCLUDE_DIRS}
+)
+
+target_compile_definitions(rich_bpftrace_mapper PRIVATE ${LLVM_DEFINITIONS})
+
+target_link_libraries(rich_bpftrace_mapper PRIVATE sigminer)
+
 add_library(mock_lib SHARED
   test/mock_lib.c
 )

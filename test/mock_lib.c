@@ -1,4 +1,18 @@
 #include <stdint.h>
+#include <stddef.h>
+
+struct TraceLeaf
+{
+    int value;
+    const char* label;
+};
+
+struct TraceNode
+{
+    int count;
+    const char* message;
+    struct TraceLeaf leaf;
+};
 
 static volatile uint64_t g_live_total = 0;
 
@@ -57,4 +71,34 @@ uint64_t RunLiveLoop(int rounds, int group_count, int lanes_per_group, uint64_t 
 
     g_live_total ^= total;
     return total;
+}
+
+__attribute__((noinline, visibility("default")))
+int DerefInt(const int* value)
+{
+    if (value == NULL)
+        return -1;
+    return *value;
+}
+
+__attribute__((noinline, visibility("default")))
+size_t CountString(const char* text)
+{
+    size_t count = 0;
+    if (text == NULL)
+        return 0;
+
+    while (text[count] != '\0')
+        ++count;
+
+    return count;
+}
+
+__attribute__((noinline, visibility("default")))
+int SumTraceNode(const struct TraceNode* node)
+{
+    if (node == NULL)
+        return -1;
+
+    return node->count + node->leaf.value;
 }

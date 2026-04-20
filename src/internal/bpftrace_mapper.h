@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <vector>
@@ -30,6 +31,10 @@ struct BpftraceRenderOptions
     bool includeUserStack = false;
     bool includeArgumentPrinting = true;
     bool includeReturnPrinting = true;
+    bool enableRichTypePrinting = false;
+    std::size_t maxAggregateDepth = 2;
+    std::size_t maxAggregateMembers = 16;
+    std::size_t maxArrayElements = 8;
 };
 
 struct BpftraceResolvedSymbol
@@ -55,6 +60,11 @@ std::string BuildBpftraceProbeBody(
 std::string BuildBpftraceUprobeScript(
         const BpftraceProbeTarget& target,
         const sigminer::Signature& sig,
+        const BpftraceRenderOptions& opts);
+
+std::string BuildRichBpftraceUprobeScript(
+        const BpftraceProbeTarget& target,
+        const sigminer::RichSignature& sig,
         const BpftraceRenderOptions& opts);
 
 std::string BuildBpftraceUprobeScript(

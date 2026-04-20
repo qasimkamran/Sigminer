@@ -2,8 +2,10 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "internal/bpftrace_mapper.h"
 #include "internal/printf_specifier_mapper.h"
@@ -90,6 +92,19 @@ std::vector<sigminer::TypeEntry> ToCppTypeEntryVector(const TypeEntry* params, s
     return cppParams;
 }
 
+std::vector<sigminer::RichParameter> ToCppRichParameterVector(
+        const RichParameter* params,
+        size_t paramsList)
+{
+    std::vector<sigminer::RichParameter> cppParams;
+    cppParams.reserve(paramsList);
+
+    for (size_t i = 0; i < paramsList; ++i)
+        cppParams.emplace_back(params[i]);
+
+    return cppParams;
+}
+
 bpftrace_mapper::BpftraceRenderOptions ToCppBpfTraceRenderOptions(const BpftraceRenderOptions* Opts)
 {
     bpftrace_mapper::BpftraceRenderOptions cppOpts{};
@@ -104,6 +119,11 @@ bpftrace_mapper::BpftraceRenderOptions ToCppBpfTraceRenderOptions(const Bpftrace
     cppOpts.includeUserStack = Opts->IncludeUserStack;
     cppOpts.includeArgumentPrinting = Opts->IncludeArgumentPrinting;
     cppOpts.includeReturnPrinting = Opts->IncludeReturnPrinting;
+    cppOpts.enableRichTypePrinting = Opts->EnableRichTypePrinting;
+    cppOpts.maxAggregateDepth = (Opts->MaxAggregateDepth != 0) ? Opts->MaxAggregateDepth : 2;
+    cppOpts.maxAggregateMembers =
+            (Opts->MaxAggregateMembers != 0) ? Opts->MaxAggregateMembers : 16;
+    cppOpts.maxArrayElements = (Opts->MaxArrayElements != 0) ? Opts->MaxArrayElements : 8;
 
     return cppOpts;
 }
@@ -160,6 +180,32 @@ bool CopyTypeEntry(const sigminer::TypeEntry& source, TypeEntry* dest)
     return true;
 }
 
+bool CopyRichTypeEntry(const sigminer::RichTypeEntry& source, RichTypeEntry* dest);
+
+bool CopyRichTypeMember(const sigminer::RichTypeMember& source, RichTypeMember* dest)
+{
+    if (dest == nullptr)
+        return false;
+
+    dest->Name = DuplicateCString(source.name);
+    dest->Offset = source.offset;
+    dest->Type = nullptr;
+
+    if (dest->Name == nullptr && !source.name.empty())
+        return false;
+
+    if (source.type) {
+        dest->Type = static_cast<RichTypeEntry*>(std::calloc(1, sizeof(RichTypeEntry)));
+        if (dest->Type == nullptr)
+            return false;
+
+        if (!CopyRichTypeEntry(*source.type, dest->Type))
+            return false;
+    }
+
+    return true;
+}
+
 void ZeroTypeEntry(TypeEntry* entry)
 {
     if (entry == nullptr)
@@ -172,6 +218,25 @@ void ZeroTypeEntry(TypeEntry* entry)
     entry->Name = nullptr;
 }
 
+void ZeroRichTypeEntry(RichTypeEntry* entry)
+{
+    if (entry == nullptr)
+        return;
+
+    entry->Kind = PRIMITIVE_KIND_UNKNOWN;
+    entry->Sign = SIGNEDNESS_UNKNOWN;
+    entry->Size = 0;
+    entry->Name = nullptr;
+    entry->IsConst = false;
+    entry->IsStringLike = false;
+    entry->IsRecursiveReference = false;
+    entry->ArrayCount = 0;
+    entry->Pointee = nullptr;
+    entry->ElementType = nullptr;
+    entry->Members = nullptr;
+    entry->MemberCount = 0;
+}
+
 void ZeroSignature(Signature* sig)
 {
     if (sig == nullptr)
@@ -181,6 +246,84 @@ void ZeroSignature(Signature* sig)
     sig->Params = nullptr;
     sig->ParamCount = 0;
     sig->HasVarArgs = false;
+}
+
+void ZeroRichSignature(RichSignature* sig)
+{
+    if (sig == nullptr)
+        return;
+
+    ZeroRichTypeEntry(&sig->Ret);
+    sig->Params = nullptr;
+    sig->ParamCount = 0;
+    sig->HasVarArgs = false;
+}
+
+void FreeRichTypeEntryTree(RichTypeEntry* entry)
+{
+    if (entry == nullptr)
+        return;
+
+    FreeRichTypeEntryTree(entry->Pointee);
+    FreeRichTypeEntryTree(entry->ElementType);
+    for (size_t i = 0; i < entry->MemberCount; ++i) {
+        std::free(entry->Members[i].Name);
+        FreeRichTypeEntryTree(entry->Members[i].Type);
+        std::free(entry->Members[i].Type);
+        entry->Members[i].Type = nullptr;
+    }
+    std::free(entry->Name);
+    std::free(entry->Pointee);
+    std::free(entry->ElementType);
+    std::free(entry->Members);
+    ZeroRichTypeEntry(entry);
+}
+
+bool CopyRichTypeEntry(const sigminer::RichTypeEntry& source, RichTypeEntry* dest)
+{
+    if (dest == nullptr)
+        return false;
+
+    ZeroRichTypeEntry(dest);
+    dest->Kind = ToCPrimitiveKind(source.kind);
+    dest->Sign = ToCSignedness(source.sign);
+    dest->Size = source.size;
+    dest->Name = DuplicateCString(source.name);
+    dest->IsConst = source.isConst;
+    dest->IsStringLike = source.isStringLike;
+    dest->IsRecursiveReference = source.isRecursiveReference;
+    dest->ArrayCount = source.arrayCount;
+
+    if (dest->Name == nullptr && !source.name.empty())
+        return false;
+
+    if (source.pointee) {
+        dest->Pointee = static_cast<RichTypeEntry*>(std::calloc(1, sizeof(RichTypeEntry)));
+        if (dest->Pointee == nullptr || !CopyRichTypeEntry(*source.pointee, dest->Pointee))
+            return false;
+    }
+
+    if (source.elementType) {
+        dest->ElementType = static_cast<RichTypeEntry*>(std::calloc(1, sizeof(RichTypeEntry)));
+        if (dest->ElementType == nullptr ||
+            !CopyRichTypeEntry(*source.elementType, dest->ElementType))
+            return false;
+    }
+
+    dest->MemberCount = source.members.size();
+    if (dest->MemberCount != 0) {
+        dest->Members = static_cast<RichTypeMember*>(
+                std::calloc(dest->MemberCount, sizeof(RichTypeMember)));
+        if (dest->Members == nullptr)
+            return false;
+
+        for (size_t i = 0; i < dest->MemberCount; ++i) {
+            if (!CopyRichTypeMember(source.members[i], &dest->Members[i]))
+                return false;
+        }
+    }
+
+    return true;
 }
 
 } // namespace
@@ -199,6 +342,94 @@ TypeEntry::TypeEntry(const ::TypeEntry& source)
 Signature::Signature(const ::Signature& source)
     : ret(source.Ret),
       params(ToCppTypeEntryVector(source.Params, source.ParamCount)),
+      hasVarArgs(source.HasVarArgs)
+{
+}
+
+RichTypeEntry::RichTypeEntry(const ::RichTypeEntry& source)
+    : kind(ToCppPrimitiveKind(source.Kind)),
+      sign(ToCppSignedness(source.Sign)),
+      size(source.Size),
+      name(source.Name != nullptr ? source.Name : ""),
+      isConst(source.IsConst),
+      isStringLike(source.IsStringLike),
+      isRecursiveReference(source.IsRecursiveReference),
+      arrayCount(source.ArrayCount)
+{
+    if (source.Pointee != nullptr)
+        pointee = std::make_unique<RichTypeEntry>(*source.Pointee);
+    if (source.ElementType != nullptr)
+        elementType = std::make_unique<RichTypeEntry>(*source.ElementType);
+    for (size_t i = 0; i < source.MemberCount; ++i) {
+        RichTypeMember member{};
+        member.name = source.Members[i].Name != nullptr ? source.Members[i].Name : "";
+        member.offset = source.Members[i].Offset;
+        if (source.Members[i].Type != nullptr)
+            member.type = std::make_unique<RichTypeEntry>(*source.Members[i].Type);
+        members.push_back(std::move(member));
+    }
+}
+
+RichTypeEntry::RichTypeEntry(const RichTypeEntry& other)
+    : kind(other.kind),
+      sign(other.sign),
+      size(other.size),
+      name(other.name),
+      isConst(other.isConst),
+      isStringLike(other.isStringLike),
+      isRecursiveReference(other.isRecursiveReference),
+      arrayCount(other.arrayCount)
+{
+    if (other.pointee)
+        pointee = std::make_unique<RichTypeEntry>(*other.pointee);
+    if (other.elementType)
+        elementType = std::make_unique<RichTypeEntry>(*other.elementType);
+    members.reserve(other.members.size());
+    for (const RichTypeMember& srcMember : other.members) {
+        RichTypeMember member{};
+        member.name = srcMember.name;
+        member.offset = srcMember.offset;
+        if (srcMember.type)
+            member.type = std::make_unique<RichTypeEntry>(*srcMember.type);
+        members.push_back(std::move(member));
+    }
+}
+
+RichTypeEntry& RichTypeEntry::operator=(const RichTypeEntry& other)
+{
+    if (this == &other)
+        return *this;
+
+    RichTypeEntry copy(other);
+    *this = std::move(copy);
+    return *this;
+}
+
+RichParameter::RichParameter(const ::RichParameter& source)
+    : name(source.Name != nullptr ? source.Name : ""),
+      type(source.Type)
+{
+}
+
+RichParameter::RichParameter(const RichParameter& other)
+    : name(other.name),
+      type(other.type)
+{
+}
+
+RichParameter& RichParameter::operator=(const RichParameter& other)
+{
+    if (this == &other)
+        return *this;
+
+    name = other.name;
+    type = other.type;
+    return *this;
+}
+
+RichSignature::RichSignature(const ::RichSignature& source)
+    : ret(source.Ret),
+      params(ToCppRichParameterVector(source.Params, source.ParamCount)),
       hasVarArgs(source.HasVarArgs)
 {
 }
@@ -256,6 +487,64 @@ Result SIGMINER_GetSignatureFromSharedObjectBySymbol(
     return result;
 }
 
+RichResult SIGMINER_GetRichSignatureFromSharedObjectBySymbol(
+        const char* sharedObjectFilePath,
+        const char* symbol)
+{
+    RichResult result{};
+    result.RetCode = RETURN_CODE_INTERNAL_FAILURE;
+
+    if (sharedObjectFilePath == nullptr || symbol == nullptr) {
+        result.RetCode = RETURN_CODE_INVALID_INPUT;
+        return result;
+    }
+
+    const sigminer::RichResult cppResult =
+            sigminer::GetRichSignatureFromSharedObjectBySymbol(sharedObjectFilePath, symbol);
+    result.RetCode = ToCReturnCode(cppResult.retCode);
+
+    if (!cppResult.sig)
+        return result;
+
+    ZeroRichSignature(&result.Sig);
+    result.Sig.HasVarArgs = cppResult.sig->hasVarArgs;
+
+    if (!CopyRichTypeEntry(cppResult.sig->ret, &result.Sig.Ret)) {
+        SIGMINER_FreeRichResult(&result);
+        result.RetCode = RETURN_CODE_INTERNAL_FAILURE;
+        return result;
+    }
+
+    result.Sig.ParamCount = cppResult.sig->params.size();
+    if (result.Sig.ParamCount != 0) {
+        result.Sig.Params = static_cast<RichParameter*>(
+                std::calloc(result.Sig.ParamCount, sizeof(RichParameter)));
+        if (result.Sig.Params == nullptr) {
+            SIGMINER_FreeRichResult(&result);
+            result.RetCode = RETURN_CODE_INTERNAL_FAILURE;
+            return result;
+        }
+
+        for (size_t i = 0; i < result.Sig.ParamCount; ++i) {
+            result.Sig.Params[i].Name = DuplicateCString(cppResult.sig->params[i].name);
+            if (result.Sig.Params[i].Name == nullptr && !cppResult.sig->params[i].name.empty()) {
+                SIGMINER_FreeRichResult(&result);
+                result.RetCode = RETURN_CODE_INTERNAL_FAILURE;
+                return result;
+            }
+
+            if (!CopyRichTypeEntry(cppResult.sig->params[i].type, &result.Sig.Params[i].Type)) {
+                SIGMINER_FreeRichResult(&result);
+                result.RetCode = RETURN_CODE_INTERNAL_FAILURE;
+                return result;
+            }
+        }
+    }
+
+    result.HasSignature = true;
+    return result;
+}
+
 void SIGMINER_FreeSignature(Signature* sig)
 {
     if (sig == nullptr)
@@ -273,6 +562,22 @@ void SIGMINER_FreeSignature(Signature* sig)
     ZeroSignature(sig);
 }
 
+void SIGMINER_FreeRichSignature(RichSignature* sig)
+{
+    if (sig == nullptr)
+        return;
+
+    FreeRichTypeEntryTree(&sig->Ret);
+
+    for (size_t i = 0; i < sig->ParamCount; ++i) {
+        std::free(sig->Params[i].Name);
+        FreeRichTypeEntryTree(&sig->Params[i].Type);
+    }
+
+    std::free(sig->Params);
+    ZeroRichSignature(sig);
+}
+
 void SIGMINER_FreeResult(Result* res)
 {
     if (res == nullptr)
@@ -281,6 +586,21 @@ void SIGMINER_FreeResult(Result* res)
     SIGMINER_FreeSignature(&res->Sig);
     res->HasSignature = false;
     res->RetCode = RETURN_CODE_SUCCESS;
+}
+
+void SIGMINER_FreeRichResult(RichResult* res)
+{
+    if (res == nullptr)
+        return;
+
+    SIGMINER_FreeRichSignature(&res->Sig);
+    res->HasSignature = false;
+    res->RetCode = RETURN_CODE_SUCCESS;
+}
+
+void SIGMINER_FreeCString(const char* str)
+{
+    std::free(const_cast<char*>(str));
 }
 
 const char* SIGMINER_TypeEntryToPrintfSpecifier(const TypeEntry* typeEntry)
@@ -398,6 +718,30 @@ const char* SIGMINER_BuildBpftraceUprobeScriptForTarget(
     const bpftrace_mapper::BpftraceRenderOptions cppOpts = ToCppBpfTraceRenderOptions(Opts);
 
     std::string result = bpftrace_mapper::BuildBpftraceUprobeScript(cppTarget, cppSig, cppOpts);
+
+    if (result.empty())
+        return nullptr;
+
+    return DuplicateCString(result);
+}
+
+const char* SIGMINER_BuildRichBpftraceUprobeScriptForTarget(
+        const BpftraceProbeTarget* Target,
+        const RichSignature* Sig,
+        const BpftraceRenderOptions* Opts )
+{
+    if (Target == nullptr || Sig == nullptr)
+        return nullptr;
+
+    if (Target->ModulePath == nullptr || Target->Symbol == nullptr)
+        return nullptr;
+
+    const bpftrace_mapper::BpftraceProbeTarget cppTarget = ToCppBpftraceProbeTarget(*Target);
+    const sigminer::RichSignature cppSig(*Sig);
+    bpftrace_mapper::BpftraceRenderOptions cppOpts = ToCppBpfTraceRenderOptions(Opts);
+    cppOpts.enableRichTypePrinting = true;
+
+    std::string result = bpftrace_mapper::BuildRichBpftraceUprobeScript(cppTarget, cppSig, cppOpts);
 
     if (result.empty())
         return nullptr;
