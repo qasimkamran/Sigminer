@@ -31,7 +31,8 @@ std::string BuildProbeHeader(
         const BpftraceProbeTarget& target,
         BpftraceProbeKind probeKind)
 {
-    return "  printf(\"" + BuildProbeLabel(target, probeKind) + "\\n\");\n";
+    return "  printf(\"%s \", strftime(\"%F %T\", nsecs));\n"
+           "  printf(\"" + BuildProbeLabel(target, probeKind) + "\\n\");\n";
 }
 
 std::string EscapeStringLiteral(const std::string& text)
