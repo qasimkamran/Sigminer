@@ -15,6 +15,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(LLVM CONFIG REQUIRED)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
+find_package(Clang CONFIG REQUIRED)
 
 add_library(sigminer STATIC
   include/sigminer/func_info.h
@@ -28,12 +29,14 @@ add_library(sigminer STATIC
   src/internal/printf_specifier_mapper.h
   src/internal/return_site_finder.h
   src/internal/signature_builder.h
+  src/internal/source_return_extractor.h
   src/internal/subprogram_finder.h
   src/internal/type_classifier.h
   src/internal/type_resolver.h
   src/sigminer.cpp
   src/sigminer_c.cpp
   src/signature_builder.cpp
+  src/source_return_extractor.cpp
   src/subprogram_finder.cpp
   src/line_table_lookup.cpp
   src/return_site_finder.cpp
@@ -53,18 +56,11 @@ target_include_directories(sigminer
 
 target_compile_definitions(sigminer PRIVATE ${LLVM_DEFINITIONS})
 
-llvm_map_components_to_libnames(SIGMINER_LLVM_LIBS
-  Object
-  DebugInfoDWARF
-  MC
-  MCDisassembler
-  Support
-  X86Desc
-  X86Disassembler
-  X86Info
+target_link_libraries(sigminer
+  PRIVATE
+    LLVM
+    clang-cpp
 )
-
-target_link_libraries(sigminer PRIVATE ${SIGMINER_LLVM_LIBS})
 
 add_executable(proto
   src/prototype.cpp
