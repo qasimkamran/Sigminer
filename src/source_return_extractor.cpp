@@ -12,19 +12,64 @@
 #include <clang/Basic/SourceManager.h>
 #include <clang/Frontend/CompilerInstance.h>
 #include <clang/Frontend/FrontendAction.h>
+#include <clang/Tooling/ArgumentsAdjusters.h>
 #include <clang/Tooling/CompilationDatabase.h>
 #include <clang/Tooling/Tooling.h>
 #include <llvm/ADT/ArrayRef.h>
+#include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/Path.h>
 
 namespace {
 
 std::string CompilationDatabaseDirectory(const std::string& compileCommandsPathOrDirectory)
 {
-    if (llvm::sys::path::filename(compileCommandsPathOrDirectory) == "compile_commands.json")
-        return llvm::sys::path::parent_path(compileCommandsPathOrDirectory).str();
+    if (llvm::sys::path::filename(compileCommandsPathOrDirectory) == "compile_commands.json") {
+        const llvm::StringRef parentPath = llvm::sys::path::parent_path(compileCommandsPathOrDirectory);
+        if (parentPath.empty())
+            return ".";
+        return parentPath.str();
+    }
 
     return compileCommandsPathOrDirectory;
+}
+
+bool IsSourcePathArgument(const std::string& arg, llvm::StringRef filename)
+{
+    return arg == filename || llvm::sys::path::filename(arg) == llvm::sys::path::filename(filename);
+}
+
+const char* LanguageForSourceFile(llvm::StringRef filename)
+{
+    const llvm::StringRef extension = llvm::sys::path::extension(filename);
+    if (extension == ".c")
+        return "c";
+    if (extension == ".cc" || extension == ".cpp" || extension == ".cxx" || extension == ".C")
+        return "c++";
+    return nullptr;
+}
+
+clang::tooling::ArgumentsAdjuster GetMissingInputFileAdjuster()
+{
+    return [](const clang::tooling::CommandLineArguments& args, llvm::StringRef filename) {
+        clang::tooling::CommandLineArguments adjusted = args;
+        const bool hasInputFile = std::any_of(
+                adjusted.begin(),
+                adjusted.end(),
+                [filename](const std::string& arg) {
+                    return IsSourcePathArgument(arg, filename);
+                });
+        if (hasInputFile)
+            return adjusted;
+
+        if (const char* language = LanguageForSourceFile(filename)) {
+            adjusted.emplace_back("-x");
+            adjusted.emplace_back(language);
+        }
+
+        adjusted.emplace_back("-c");
+        adjusted.emplace_back(filename.str());
+        return adjusted;
+    };
 }
 
 sigminer::SourceLocation ToSourceLocation(
@@ -180,10 +225,22 @@ std::vector<sigminer::SourceReturnCandidate> ExtractSourceReturnCandidates(
             clang::tooling::CompilationDatabase::loadFromDirectory(
                     CompilationDatabaseDirectory(compileCommandsPathOrDirectory),
                     error);
-    if (!compilations)
+    if (!compilations) {
+        llvm::errs() << "failed to load compilation database: " << error << "\n";
         return sourceReturns;
+    }
+
+    const std::vector<clang::tooling::CompileCommand> compileCommands =
+            compilations->getCompileCommands(sourceFilePath);
+    if (compileCommands.empty()) {
+        llvm::errs() << "no compile command found for inferred source file: "
+                     << sourceFilePath << "\n";
+        llvm::errs() << "pass the exact source path from compile_commands.json as the fourth argument if DWARF uses a different path\n";
+        return sourceReturns;
+    }
 
     clang::tooling::ClangTool tool(*compilations, llvm::ArrayRef<std::string>{sourceFilePath});
+    tool.appendArgumentsAdjuster(GetMissingInputFileAdjuster());
     ReturnStmtFrontendActionFactory factory(functionName, sourceReturns);
     if (tool.run(&factory) != 0)
         return {};

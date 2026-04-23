@@ -338,9 +338,8 @@ std::optional<std::string> InferSourceFileForSubprogram(
     const char* compilationDir = unit->getCompilationDir();
     const llvm::StringRef compDir = compilationDir != nullptr ? compilationDir : "";
 
-    if (llvm::Optional<llvm::DWARFFormValue> declFileAttr =
-                subprogramDie.find(llvm::dwarf::DW_AT_decl_file)) {
-        llvm::Optional<std::uint64_t> declFile = declFileAttr->getAsUnsignedConstant();
+    if (auto declFileAttr = subprogramDie.find(llvm::dwarf::DW_AT_decl_file)) {
+        auto declFile = declFileAttr->getAsUnsignedConstant();
         if (declFile) {
             std::string file{};
             if (lineTable->getFileNameByIndex(

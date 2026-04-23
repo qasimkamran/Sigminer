@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <type_traits>
 
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/StringRef.h>
@@ -43,6 +44,21 @@ bool RangeContainsRange(
     return rangeLow <= addressLow && addressLow <= addressHigh && addressHigh <= rangeHigh;
 }
 
+template <typename FeaturesT>
+std::string FeaturesToString(FeaturesT&& features)
+{
+    using DecayedFeaturesT = std::decay_t<FeaturesT>;
+    if constexpr (std::is_same_v<DecayedFeaturesT, llvm::Expected<llvm::SubtargetFeatures>>) {
+        if (!features) {
+            llvm::consumeError(features.takeError());
+            return {};
+        }
+        return features->getString();
+    } else {
+        return features.getString();
+    }
+}
+
 bool InitializeTargetForTriple(const llvm::Triple& triple)
 {
     static const bool x86Initialized = [] {
@@ -76,7 +92,7 @@ std::unique_ptr<DisassemblerContext> CreateDisassemblerContext(
 
     std::unique_ptr<DisassemblerContext> ctx = std::make_unique<DisassemblerContext>();
     const std::string tripleName = triple.str();
-    const std::string features = object.getFeatures().getString();
+    const std::string features = FeaturesToString(object.getFeatures());
 
     ctx->registerInfo.reset(target->createMCRegInfo(tripleName));
     if (!ctx->registerInfo)
