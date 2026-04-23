@@ -4,6 +4,7 @@
 #include <llvm/Support/Error.h>
 
 #include "internal/dwarf_session.h"
+#include "internal/line_table_lookup.h"
 #include "internal/return_site_finder.h"
 #include "internal/subprogram_finder.h"
 #include "sigminer/func_info.h"
@@ -70,15 +71,27 @@ void PrintReturnSites(const char* sharedObjectFilePath, const char* symbol)
         return;
     }
 
-    const std::vector<sigminer::ReturnSite> returnSites =
+    std::vector<sigminer::ReturnSite> returnSites =
             GetReturnSitesWithinSubprogramDie(subprogramDie, *session.object);
+    for (sigminer::ReturnSite& returnSite : returnSites)
+        PopulateSourceLocationForReturnSite(*session.context, subprogramDie, returnSite);
 
     std::printf("Return sites - count:%zu\n", returnSites.size());
     for (const sigminer::ReturnSite& returnSite : returnSites) {
-        std::printf(
-                "Return site - {address:0x%llx, funcOffset:0x%llx}\n",
-                static_cast<unsigned long long>(returnSite.instructionAddress),
-                static_cast<unsigned long long>(returnSite.funcOffset));
+        if (returnSite.sourceLocation) {
+            std::printf(
+                    "Return site - {address:0x%llx, funcOffset:0x%llx, source:%s:%u:%u}\n",
+                    static_cast<unsigned long long>(returnSite.instructionAddress),
+                    static_cast<unsigned long long>(returnSite.funcOffset),
+                    returnSite.sourceLocation->file.c_str(),
+                    returnSite.sourceLocation->line,
+                    returnSite.sourceLocation->column);
+        } else {
+            std::printf(
+                    "Return site - {address:0x%llx, funcOffset:0x%llx, source:<unresolved>}\n",
+                    static_cast<unsigned long long>(returnSite.instructionAddress),
+                    static_cast<unsigned long long>(returnSite.funcOffset));
+        }
     }
 }
 

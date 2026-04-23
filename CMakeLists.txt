@@ -24,6 +24,7 @@ add_library(sigminer STATIC
   src/dwarf_session.cpp
   src/internal/bpftrace_mapper.h
   src/internal/dwarf_session.h
+  src/internal/line_table_lookup.h
   src/internal/printf_specifier_mapper.h
   src/internal/return_site_finder.h
   src/internal/signature_builder.h
@@ -34,6 +35,7 @@ add_library(sigminer STATIC
   src/sigminer_c.cpp
   src/signature_builder.cpp
   src/subprogram_finder.cpp
+  src/line_table_lookup.cpp
   src/return_site_finder.cpp
   src/type_classifier.cpp
   src/type_resolver.cpp

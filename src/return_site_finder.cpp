@@ -151,7 +151,8 @@ std::vector<sigminer::ReturnSite> GetReturnSitesWithinSubprogramDie(
         if (range.LowPC >= range.HighPC)
             continue;
 
-        for (const llvm::object::SectionRef& section : object.sections()) {
+        for (const llvm::object::SectionRef& section : object.sections())
+        {
             if (!section.isText())
                 continue;
 
