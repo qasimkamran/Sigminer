@@ -3,17 +3,17 @@
 #include <cstdint>
 #include <optional>
 #include <string>
-#include <vector>
+
+#include <llvm/DebugInfo/DWARF/DWARFAddressRange.h>
 
 #include "sigminer/signature.h"
 #include "sigminer/sigminer.h"
 
 namespace sigminer {
 
-struct AddressRange
-{
-    std::uint64_t lowPc = 0;
-    std::uint64_t highPc = 0;
+struct ReturnSite {
+    uint64_t instructionAddress;
+    uint64_t funcOffset;
 };
 
 class FunctionInfo
@@ -23,7 +23,7 @@ public:
 
     std::string name{};
     Signature sig{};
-    std::vector<AddressRange> addressRanges{};
+    llvm::DWARFAddressRangesVector addressRanges{};
 };
 
 class FunctionInfoResult

@@ -17,11 +17,24 @@ message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
 add_library(sigminer STATIC
+  include/sigminer/func_info.h
+  include/sigminer/sigminer.h
+  include/sigminer/sigminer_c.h
+  include/sigminer/signature.h
   src/dwarf_session.cpp
+  src/internal/bpftrace_mapper.h
+  src/internal/dwarf_session.h
+  src/internal/printf_specifier_mapper.h
+  src/internal/return_site_finder.h
+  src/internal/signature_builder.h
+  src/internal/subprogram_finder.h
+  src/internal/type_classifier.h
+  src/internal/type_resolver.h
   src/sigminer.cpp
   src/sigminer_c.cpp
   src/signature_builder.cpp
   src/subprogram_finder.cpp
+  src/return_site_finder.cpp
   src/type_classifier.cpp
   src/type_resolver.cpp
   src/printf_specifier_mapper.cpp
@@ -41,7 +54,12 @@ target_compile_definitions(sigminer PRIVATE ${LLVM_DEFINITIONS})
 llvm_map_components_to_libnames(SIGMINER_LLVM_LIBS
   Object
   DebugInfoDWARF
+  MC
+  MCDisassembler
   Support
+  X86Desc
+  X86Disassembler
+  X86Info
 )
 
 target_link_libraries(sigminer PRIVATE ${SIGMINER_LLVM_LIBS})

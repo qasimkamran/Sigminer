@@ -1,5 +1,12 @@
 #include <cstdio>
 #include <string>
+
+#include <llvm/Support/Error.h>
+
+#include "internal/dwarf_session.h"
+#include "internal/return_site_finder.h"
+#include "internal/subprogram_finder.h"
+#include "sigminer/func_info.h"
 #include "sigminer/sigminer.h"
 
 namespace {
@@ -41,6 +48,40 @@ void PrintType(const char* label, const sigminer::TypeEntry& entry)
             entry.name.c_str());
 }
 
+void PrintReturnSites(const char* sharedObjectFilePath, const char* symbol)
+{
+    llvm::Expected<dwarf_session::Session> sessionOrErr =
+            dwarf_session::Open(sharedObjectFilePath);
+    if (!sessionOrErr) {
+        std::printf("Return sites - unavailable: %s\n", llvm::toString(sessionOrErr.takeError()).c_str());
+        return;
+    }
+
+    dwarf_session::Session& session = *sessionOrErr;
+    if (!session.context || !session.object) {
+        std::printf("Return sites - unavailable: missing DWARF context or object file\n");
+        return;
+    }
+
+    const llvm::DWARFDie subprogramDie =
+            subprogram_finder::GetTargetSubprogram(*session.context, symbol);
+    if (!subprogramDie) {
+        std::printf("Return sites - unavailable: symbol not found in DWARF\n");
+        return;
+    }
+
+    const std::vector<sigminer::ReturnSite> returnSites =
+            GetReturnSitesWithinSubprogramDie(subprogramDie, *session.object);
+
+    std::printf("Return sites - count:%zu\n", returnSites.size());
+    for (const sigminer::ReturnSite& returnSite : returnSites) {
+        std::printf(
+                "Return site - {address:0x%llx, funcOffset:0x%llx}\n",
+                static_cast<unsigned long long>(returnSite.instructionAddress),
+                static_cast<unsigned long long>(returnSite.funcOffset));
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -60,6 +101,8 @@ int main(int argc, char** argv)
     PrintType("Return type", result.sig->ret);
     for (const sigminer::TypeEntry& typeEntry : result.sig->params)
         PrintType("Argument type", typeEntry);
+
+    PrintReturnSites(argv[1], argv[2]);
 
     std::printf("PASS: all steps passed without failure\n");
     return 0;
