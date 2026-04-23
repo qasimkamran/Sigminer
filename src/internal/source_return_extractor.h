@@ -8,4 +8,5 @@
 std::vector<sigminer::SourceReturnCandidate> ExtractSourceReturnCandidates(
         const std::string& compileCommandsPathOrDirectory,
         const std::string& sourceFilePath,
-        const std::string& functionName);
+        const std::string& functionName,
+        const std::vector<std::string>& extraClangArgs = {});

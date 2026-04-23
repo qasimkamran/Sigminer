@@ -54,7 +54,8 @@ void PrintReturnSites(
         const char* sharedObjectFilePath,
         const char* symbol,
         const char* compileCommandsPath,
-        const char* sourceFilePath)
+        const char* sourceFilePath,
+        const std::vector<std::string>& extraClangArgs)
 {
     llvm::Expected<dwarf_session::Session> sessionOrErr =
             dwarf_session::Open(sharedObjectFilePath);
@@ -118,7 +119,11 @@ void PrintReturnSites(
     }
 
     const std::vector<sigminer::SourceReturnCandidate> sourceReturns =
-            ExtractSourceReturnCandidates(compileCommandsPath, sourceFilePath, symbol);
+            ExtractSourceReturnCandidates(
+                    compileCommandsPath,
+                    sourceFilePath,
+                    symbol,
+                    extraClangArgs);
     std::printf("Source returns - count:%zu\n", sourceReturns.size());
     for (const sigminer::SourceReturnCandidate& sourceReturn : sourceReturns) {
         std::printf(
@@ -154,10 +159,27 @@ void PrintReturnSites(
 
 int main(int argc, char** argv)
 {
-    if (argc != 3 && argc != 4 && argc != 5) {
-        std::printf("FAIL: pass 2, 3, or 4 arguments: <binary> <symbol> [compile_commands path-or-dir] [source file override]\n");
+    if (argc < 3) {
+        std::printf("FAIL: pass arguments: <binary> <symbol> [compile_commands path-or-dir] [source file override] [-- extra clang args]\n");
         return 1;
     }
+
+    int delimiterIndex = argc;
+    for (int index = 3; index < argc; ++index) {
+        if (std::string(argv[index]) == "--") {
+            delimiterIndex = index;
+            break;
+        }
+    }
+
+    if (delimiterIndex > 5) {
+        std::printf("FAIL: pass arguments: <binary> <symbol> [compile_commands path-or-dir] [source file override] [-- extra clang args]\n");
+        return 1;
+    }
+
+    std::vector<std::string> extraClangArgs{};
+    for (int index = delimiterIndex + 1; index < argc; ++index)
+        extraClangArgs.emplace_back(argv[index]);
 
     const sigminer::Result result =
             sigminer::GetSignatureFromSharedObjectBySymbol(argv[1], argv[2]);
@@ -173,8 +195,9 @@ int main(int argc, char** argv)
     PrintReturnSites(
             argv[1],
             argv[2],
-            argc >= 4 ? argv[3] : nullptr,
-            argc == 5 ? argv[4] : nullptr);
+            delimiterIndex >= 4 ? argv[3] : nullptr,
+            delimiterIndex >= 5 ? argv[4] : nullptr,
+            extraClangArgs);
 
     std::printf("PASS: all steps passed without failure\n");
     return 0;

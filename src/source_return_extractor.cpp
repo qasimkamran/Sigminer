@@ -72,6 +72,18 @@ clang::tooling::ArgumentsAdjuster GetMissingInputFileAdjuster()
     };
 }
 
+clang::tooling::ArgumentsAdjuster GetExtraClangArgsAdjuster(
+        std::vector<std::string> extraClangArgs)
+{
+    return [extraClangArgs = std::move(extraClangArgs)](
+                   const clang::tooling::CommandLineArguments& args,
+                   llvm::StringRef) {
+        clang::tooling::CommandLineArguments adjusted = args;
+        adjusted.insert(adjusted.end(), extraClangArgs.begin(), extraClangArgs.end());
+        return adjusted;
+    };
+}
+
 sigminer::SourceLocation ToSourceLocation(
         const clang::SourceManager& sourceManager,
         clang::SourceLocation location)
@@ -214,7 +226,8 @@ private:
 std::vector<sigminer::SourceReturnCandidate> ExtractSourceReturnCandidates(
         const std::string& compileCommandsPathOrDirectory,
         const std::string& sourceFilePath,
-        const std::string& functionName)
+        const std::string& functionName,
+        const std::vector<std::string>& extraClangArgs)
 {
     std::vector<sigminer::SourceReturnCandidate> sourceReturns{};
     if (compileCommandsPathOrDirectory.empty() || sourceFilePath.empty() || functionName.empty())
@@ -240,6 +253,8 @@ std::vector<sigminer::SourceReturnCandidate> ExtractSourceReturnCandidates(
     }
 
     clang::tooling::ClangTool tool(*compilations, llvm::ArrayRef<std::string>{sourceFilePath});
+    if (!extraClangArgs.empty())
+        tool.appendArgumentsAdjuster(GetExtraClangArgsAdjuster(extraClangArgs));
     tool.appendArgumentsAdjuster(GetMissingInputFileAdjuster());
     ReturnStmtFrontendActionFactory factory(functionName, sourceReturns);
     if (tool.run(&factory) != 0)
