@@ -64,6 +64,12 @@ typedef struct Result
     ReturnCode RetCode;
 } Result;
 
+typedef struct RichParameter
+{
+    char* Name;
+    TypeEntry Type;
+} RichParameter;
+
 typedef enum BpftraceProbeKind
 {
     BPFTRACE_PROBE_KIND_ENTRY = 0,
