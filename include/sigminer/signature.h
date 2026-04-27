@@ -104,7 +104,7 @@ public:
 
     bool isConst = false;
     bool isStringLike = false;
-    bool isRescursiveReference = false;
+    bool isRecursiveReference = false;
 
     std::size_t arrayCount = 0;
     std::unique_ptr<TypeEntry> elementType;
