@@ -1,14 +1,18 @@
 #include "internal/bpftrace_mapper.h"
 
+#include <algorithm>
+#include <cctype>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "internal/printf_specifier_mapper.h"
 
 namespace bpftrace_mapper {
+
 namespace {
 
-std::string BuildProbeLabel(
+static std::string BuildProbeLabel(
         const BpftraceProbeTarget& target,
         BpftraceProbeKind probeKind)
 {
@@ -16,7 +20,7 @@ std::string BuildProbeLabel(
     return target.modulePath + ":" + target.symbol + " [" + probeLabel + "]";
 }
 
-std::string BuildProbeSelector(const BpftraceRenderOptions& opts)
+static std::string BuildProbeSelector(const BpftraceRenderOptions& opts)
 {
     if (!opts.pid.has_value())
         return {};
@@ -24,16 +28,847 @@ std::string BuildProbeSelector(const BpftraceRenderOptions& opts)
     return " /pid == " + std::to_string(*opts.pid) + "/";
 }
 
-std::string BuildProbeHeader(
+static std::string BuildProbeHeader(
         const BpftraceProbeTarget& target,
         BpftraceProbeKind probeKind)
 {
     return "  printf(\"" + BuildProbeLabel(target, probeKind) + "\\n\");\n";
 }
 
-std::string BuildTimingKey(const BpftraceProbeTarget& target)
+static std::string BuildTimingKey(const BpftraceProbeTarget& target)
 {
     return target.modulePath + ":" + target.symbol;
+}
+
+static std::string EscapeStringLiteral(const std::string& text)
+{
+    std::string escaped;
+    escaped.reserve(text.size());
+
+    for (char ch : text) {
+        if (ch == '\\' || ch == '"')
+            escaped.push_back('\\');
+        escaped.push_back(ch);
+    }
+
+    return escaped;
+}
+
+static std::string SanitizeIdentifier(std::string text)
+{
+    for (char& ch : text) {
+        if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '_')
+            ch = '_';
+    }
+
+    if (text.empty() || std::isdigit(static_cast<unsigned char>(text.front())))
+        text.insert(text.begin(), '_');
+
+    return text;
+}
+
+static std::string Indent(std::size_t depth)
+{
+    return std::string(depth * 2, ' ');
+}
+
+static std::string MakeScratchVar(const std::string& label, const char* suffix)
+{
+    return "$" + SanitizeIdentifier(label) + "_" + suffix;
+}
+
+static std::string PrimitiveCastName(
+        std::size_t size,
+        sigminer::Signedness sign,
+        sigminer::PrimitiveKind kind)
+{
+    if (kind == sigminer::PrimitiveKind::BOOL)
+        return "uint8";
+
+    if (kind != sigminer::PrimitiveKind::INT && kind != sigminer::PrimitiveKind::ENUM)
+        return {};
+
+    if (size == 1)
+        return (sign == sigminer::Signedness::SIGNED) ? "int8" : "uint8";
+    if (size == 2)
+        return (sign == sigminer::Signedness::SIGNED) ? "int16" : "uint16";
+    if (size == 4)
+        return (sign == sigminer::Signedness::SIGNED) ? "int32" : "uint32";
+    if (size == 8)
+        return (sign == sigminer::Signedness::SIGNED) ? "int64" : "uint64";
+
+    return {};
+}
+
+static bool IsScalarKind(sigminer::PrimitiveKind kind)
+{
+    return kind == sigminer::PrimitiveKind::BOOL ||
+           kind == sigminer::PrimitiveKind::INT ||
+           kind == sigminer::PrimitiveKind::ENUM ||
+           kind == sigminer::PrimitiveKind::FLOAT;
+}
+
+static std::string StorageTypeName(const sigminer::rich::TypeEntry& type)
+{
+    if (type.kind == sigminer::PrimitiveKind::FLOAT) {
+        if (type.size == 4)
+            return "uint32";
+        if (type.size == 8)
+            return "uint64";
+        return {};
+    }
+
+    return PrimitiveCastName(type.size, type.sign, type.kind);
+}
+
+static std::string PointerIntegerTypeName(std::size_t size)
+{
+    if (size == 4)
+        return "uint32";
+    return "uint64";
+}
+
+static std::string BuildAddressOffsetExpr(const std::string& baseExpr, std::size_t offset)
+{
+    if (offset == 0)
+        return baseExpr;
+    return "(" + baseExpr + " + " + std::to_string(offset) + ")";
+}
+
+static bool IsFloatLike(const sigminer::rich::TypeEntry& type)
+{
+    return type.kind == sigminer::PrimitiveKind::FLOAT;
+}
+
+static bool ContainsFloatLikeMember(const sigminer::rich::TypeEntry& type)
+{
+    if (IsFloatLike(type))
+        return true;
+    if (type.pointee && ContainsFloatLikeMember(*type.pointee))
+        return true;
+    if (type.elementType && ContainsFloatLikeMember(*type.elementType))
+        return true;
+    for (const sigminer::rich::TypeMember& member : type.members) {
+        if (member.type && ContainsFloatLikeMember(*member.type))
+            return true;
+    }
+    return false;
+}
+
+static std::string BuildRichArgumentExpr(
+        const sigminer::rich::TypeEntry& type,
+        std::size_t regIndex,
+        std::size_t stackOffset,
+        bool* supported)
+{
+    static const char* kIntArgRegs[] = { "di", "si", "dx", "cx", "r8", "r9" };
+
+    if (supported)
+        *supported = true;
+
+    if (IsFloatLike(type)) {
+        if (supported)
+            *supported = false;
+        return {};
+    }
+
+    if (regIndex < (sizeof(kIntArgRegs) / sizeof(kIntArgRegs[0])))
+        return "reg(\"" + std::string(kIntArgRegs[regIndex]) + "\")";
+
+    return "*(uptr((uint64*)(reg(\"sp\") + " + std::to_string(stackOffset) + ")))";
+}
+
+static std::size_t RoundUpToEight(std::size_t value)
+{
+    return ((value + 7) / 8) * 8;
+}
+
+static bool IsMemoryPassedAggregate(const sigminer::rich::TypeEntry& type)
+{
+    return type.kind == sigminer::PrimitiveKind::AGGREGATE && type.size > 16;
+}
+
+static bool IsRegisterPassedAggregate(const sigminer::rich::TypeEntry& type)
+{
+    return type.kind == sigminer::PrimitiveKind::AGGREGATE &&
+           type.size != 0 &&
+           type.size <= 16 &&
+           !ContainsFloatLikeMember(type);
+}
+
+static std::size_t AggregateRegisterSlots(const sigminer::rich::TypeEntry& type)
+{
+    return RoundUpToEight(type.size) / 8;
+}
+
+static void AppendLine(std::string& out, std::size_t depth, const std::string& line)
+{
+    out += Indent(depth) + line + "\n";
+}
+
+static void AppendPrintf(std::string& out, std::size_t depth, const std::string& message)
+{
+    AppendLine(out, depth, "printf(\"" + EscapeStringLiteral(message) + "\\n\");");
+}
+
+static void RenderRichValue(
+        std::string& out,
+        const sigminer::rich::TypeEntry& type,
+        const std::string& expr,
+        const std::string& label,
+        const bpftrace_mapper::rich::ExtendedBpftraceRenderOptions& opts,
+        std::size_t depth,
+        std::size_t aggregateDepth);
+
+static void RenderRichValueFromAddress(
+        std::string& out,
+        const sigminer::rich::TypeEntry& type,
+        const std::string& addressExpr,
+        const std::string& label,
+        const bpftrace_mapper::rich::ExtendedBpftraceRenderOptions& opts,
+        std::size_t depth,
+        std::size_t aggregateDepth);
+
+static void RenderRichValueFromRegisterSlots(
+        std::string& out,
+        const sigminer::rich::TypeEntry& type,
+        const std::vector<std::string>& slotExprs,
+        std::size_t baseOffset,
+        const std::string& label,
+        const bpftrace_mapper::rich::ExtendedBpftraceRenderOptions& opts,
+        std::size_t depth,
+        std::size_t aggregateDepth);
+
+static void RenderAggregateMembers(
+        std::string& out,
+        const sigminer::rich::TypeEntry& type,
+        const std::string& addressExpr,
+        const std::string& label,
+        const bpftrace_mapper::rich::ExtendedBpftraceRenderOptions& opts,
+        std::size_t depth,
+        std::size_t aggregateDepth)
+{
+    if (aggregateDepth >= opts.maxAggregateDepth) {
+        AppendPrintf(out, depth, label + ": <aggregate depth limit>");
+        return;
+    }
+
+    const std::size_t memberCount = std::min(type.members.size(), opts.maxAggregateMembers);
+    AppendPrintf(out, depth, label + ": {" + type.name + "}");
+
+    for (std::size_t i = 0; i < memberCount; ++i) {
+        const sigminer::rich::TypeMember& member = type.members[i];
+        if (!member.type)
+            continue;
+
+        RenderRichValueFromAddress(
+                out,
+                *member.type,
+                BuildAddressOffsetExpr(addressExpr, member.offset),
+                label + "." + member.name,
+                opts,
+                depth,
+                aggregateDepth + 1);
+    }
+
+    if (type.members.size() > memberCount)
+        AppendPrintf(out, depth, label + ": <member output truncated>");
+}
+
+static void RenderArrayValue(
+        std::string& out,
+        const sigminer::rich::TypeEntry& type,
+        const std::string& addressExpr,
+        const std::string& label,
+        const bpftrace_mapper::rich::ExtendedBpftraceRenderOptions& opts,
+        std::size_t depth,
+        std::size_t aggregateDepth)
+{
+    if (type.isStringLike) {
+        AppendLine(out, depth, "printf(\"    " + EscapeStringLiteral(label) +
+                                 ": %s\\n\", str(uptr(" + addressExpr + ")));");
+        return;
+    }
+
+    AppendPrintf(out, depth, label + ": [");
+
+    if (!type.elementType)
+        return;
+
+    if (type.elementType->size == 0) {
+        AppendPrintf(out, depth, label + ": <unknown element size>");
+        return;
+    }
+
+    const std::size_t count = std::min(type.arrayCount, opts.maxArrayElements);
+    for (std::size_t i = 0; i < count; ++i) {
+        RenderRichValueFromAddress(
+                out,
+                *type.elementType,
+                BuildAddressOffsetExpr(addressExpr, i * type.elementType->size),
+                label + "[" + std::to_string(i) + "]",
+                opts,
+                depth,
+                aggregateDepth);
+    }
+
+    if (type.arrayCount > count)
+        AppendPrintf(out, depth, label + ": <array output truncated>");
+}
+
+static void RenderPrimitiveValueFromAddress(
+        std::string& out,
+        const sigminer::rich::TypeEntry& type,
+        const std::string& addressExpr,
+        const std::string& label,
+        std::size_t depth)
+{
+    sigminer::TypeEntry shallow{};
+    shallow.kind = type.kind;
+    shallow.sign = type.sign;
+    shallow.size = type.size;
+    shallow.name = type.name;
+
+    const std::string storageType = StorageTypeName(type);
+    const std::string specifier = printf_specifier_mapper::TypeEntryToPrintfSpecifier(shallow);
+    if (storageType.empty() || specifier.empty()) {
+        AppendPrintf(out, depth, label + ": <unsupported primitive read>");
+        return;
+    }
+
+    const std::string typedPtrVar = MakeScratchVar(label, "typed_ptr");
+    const std::string valueVar = MakeScratchVar(label, "value");
+    AppendLine(
+            out,
+            depth,
+            typedPtrVar + " = uptr((" + storageType + "*)(" + addressExpr + "));");
+    AppendLine(out, depth, valueVar + " = *" + typedPtrVar + ";");
+    AppendLine(
+            out,
+            depth,
+            "printf(\"    " + EscapeStringLiteral(label) + ": " + EscapeStringLiteral(specifier) +
+                    "\\n\", " + valueVar + ");");
+}
+
+static void RenderPrimitiveValueFromRegisterSlots(
+        std::string& out,
+        const sigminer::rich::TypeEntry& type,
+        const std::vector<std::string>& slotExprs,
+        std::size_t baseOffset,
+        const std::string& label,
+        std::size_t depth)
+{
+    sigminer::TypeEntry shallow{};
+    shallow.kind = type.kind;
+    shallow.sign = type.sign;
+    shallow.size = type.size;
+    shallow.name = type.name;
+
+    const std::string storageType = StorageTypeName(type);
+    const std::string specifier = printf_specifier_mapper::TypeEntryToPrintfSpecifier(shallow);
+    if (storageType.empty() || specifier.empty()) {
+        AppendPrintf(out, depth, label + ": <unsupported primitive register read>");
+        return;
+    }
+
+    const std::size_t slotIndex = baseOffset / 8;
+    const std::size_t slotOffset = baseOffset % 8;
+    if (slotIndex >= slotExprs.size() || slotOffset + type.size > 8) {
+        AppendPrintf(out, depth, label + ": <cross-slot register read unsupported>");
+        return;
+    }
+
+    const std::string rawVar = MakeScratchVar(label, "raw");
+    const std::string valueVar = MakeScratchVar(label, "value");
+    AppendLine(out, depth, rawVar + " = " + slotExprs[slotIndex] + ";");
+    if (slotOffset != 0)
+        AppendLine(out, depth, rawVar + " = " + rawVar + " >> " + std::to_string(slotOffset * 8) + ";");
+
+    AppendLine(out, depth, valueVar + " = (" + storageType + ")(" + rawVar + ");");
+    AppendLine(
+            out,
+            depth,
+            "printf(\"    " + EscapeStringLiteral(label) + ": " + EscapeStringLiteral(specifier) +
+                    "\\n\", " + valueVar + ");");
+}
+
+static void RenderPointerValueFromAddress(
+        std::string& out,
+        const sigminer::rich::TypeEntry& type,
+        const std::string& addressExpr,
+        const std::string& label,
+        const bpftrace_mapper::rich::ExtendedBpftraceRenderOptions& opts,
+        std::size_t depth,
+        std::size_t aggregateDepth)
+{
+    const std::string ptrStorageType = PointerIntegerTypeName(type.size);
+    const std::string typedPtrVar = MakeScratchVar(label, "typed_ptr");
+    const std::string ptrVar = MakeScratchVar(label, "ptr");
+    AppendLine(
+            out,
+            depth,
+            typedPtrVar + " = uptr((" + ptrStorageType + "*)(" + addressExpr + "));");
+    AppendLine(out, depth, ptrVar + " = *" + typedPtrVar + ";");
+    AppendLine(out, depth, "printf(\"    " + EscapeStringLiteral(label) + ".addr: %p\\n\", " + ptrVar + ");");
+    AppendLine(out, depth, "if (" + ptrVar + " != 0) {");
+
+    if (!type.pointee) {
+        AppendPrintf(out, depth + 1, label + ": <unknown pointee>");
+        AppendLine(out, depth, "}");
+        return;
+    }
+
+    if (type.isStringLike) {
+        AppendLine(
+                out,
+                depth + 1,
+                "printf(\"    " + EscapeStringLiteral(label) + ": %s\\n\", str(uptr(" + ptrVar + ")));");
+        AppendLine(out, depth, "}");
+        return;
+    }
+
+    if (IsScalarKind(type.pointee->kind)) {
+        RenderPrimitiveValueFromAddress(out, *type.pointee, ptrVar, label + ".value", depth + 1);
+    } else if (type.pointee->kind == sigminer::PrimitiveKind::AGGREGATE) {
+        RenderAggregateMembers(
+                out,
+                *type.pointee,
+                ptrVar,
+                label + ".value",
+                opts,
+                depth + 1,
+                aggregateDepth);
+    } else if (type.pointee->kind == sigminer::PrimitiveKind::POINTER) {
+        RenderPointerValueFromAddress(
+                out,
+                *type.pointee,
+                ptrVar,
+                label + ".value",
+                opts,
+                depth + 1,
+                aggregateDepth);
+    } else if (type.pointee->arrayCount != 0 && type.pointee->elementType) {
+        RenderArrayValue(out, *type.pointee, ptrVar, label + ".value", opts, depth + 1, aggregateDepth);
+    } else {
+        AppendPrintf(out, depth + 1, label + ": <unsupported pointee>");
+    }
+
+    AppendLine(out, depth, "}");
+}
+
+static void RenderPointerValueFromRegisterSlots(
+        std::string& out,
+        const sigminer::rich::TypeEntry& type,
+        const std::vector<std::string>& slotExprs,
+        std::size_t baseOffset,
+        const std::string& label,
+        const bpftrace_mapper::rich::ExtendedBpftraceRenderOptions& opts,
+        std::size_t depth,
+        std::size_t aggregateDepth)
+{
+    const std::size_t slotIndex = baseOffset / 8;
+    const std::size_t slotOffset = baseOffset % 8;
+    if (slotIndex >= slotExprs.size() || slotOffset + type.size > 8) {
+        AppendPrintf(out, depth, label + ": <cross-slot pointer read unsupported>");
+        return;
+    }
+
+    const std::string rawVar = MakeScratchVar(label, "raw");
+    const std::string ptrVar = MakeScratchVar(label, "ptr");
+    AppendLine(out, depth, rawVar + " = " + slotExprs[slotIndex] + ";");
+    if (slotOffset != 0)
+        AppendLine(out, depth, rawVar + " = " + rawVar + " >> " + std::to_string(slotOffset * 8) + ";");
+    AppendLine(out, depth, ptrVar + " = (" + PointerIntegerTypeName(type.size) + ")(" + rawVar + ");");
+    AppendLine(out, depth, "printf(\"    " + EscapeStringLiteral(label) + ".addr: %p\\n\", " + ptrVar + ");");
+    AppendLine(out, depth, "if (" + ptrVar + " != 0) {");
+
+    if (!type.pointee) {
+        AppendPrintf(out, depth + 1, label + ": <unknown pointee>");
+        AppendLine(out, depth, "}");
+        return;
+    }
+
+    if (type.isStringLike) {
+        AppendLine(
+                out,
+                depth + 1,
+                "printf(\"    " + EscapeStringLiteral(label) + ": %s\\n\", str(uptr(" + ptrVar + ")));");
+        AppendLine(out, depth, "}");
+        return;
+    }
+
+    if (IsScalarKind(type.pointee->kind)) {
+        RenderPrimitiveValueFromAddress(out, *type.pointee, ptrVar, label + ".value", depth + 1);
+    } else if (type.pointee->kind == sigminer::PrimitiveKind::AGGREGATE) {
+        RenderAggregateMembers(out, *type.pointee, ptrVar, label + ".value", opts, depth + 1, aggregateDepth);
+    } else if (type.pointee->kind == sigminer::PrimitiveKind::POINTER) {
+        RenderPointerValueFromAddress(out, *type.pointee, ptrVar, label + ".value", opts, depth + 1, aggregateDepth);
+    } else if (type.pointee->arrayCount != 0 && type.pointee->elementType) {
+        RenderArrayValue(out, *type.pointee, ptrVar, label + ".value", opts, depth + 1, aggregateDepth);
+    } else {
+        AppendPrintf(out, depth + 1, label + ": <unsupported pointee>");
+    }
+
+    AppendLine(out, depth, "}");
+}
+
+static void RenderRichValueFromAddress(
+        std::string& out,
+        const sigminer::rich::TypeEntry& type,
+        const std::string& addressExpr,
+        const std::string& label,
+        const bpftrace_mapper::rich::ExtendedBpftraceRenderOptions& opts,
+        std::size_t depth,
+        std::size_t aggregateDepth)
+{
+    if (type.isRecursiveReference) {
+        AppendPrintf(out, depth, label + ": <recursive reference>");
+        return;
+    }
+
+    if (type.arrayCount != 0 && type.elementType) {
+        RenderArrayValue(out, type, addressExpr, label, opts, depth, aggregateDepth);
+        return;
+    }
+
+    if (IsScalarKind(type.kind)) {
+        RenderPrimitiveValueFromAddress(out, type, addressExpr, label, depth);
+        return;
+    }
+
+    if (type.kind == sigminer::PrimitiveKind::POINTER) {
+        RenderPointerValueFromAddress(out, type, addressExpr, label, opts, depth, aggregateDepth);
+        return;
+    }
+
+    if (type.kind == sigminer::PrimitiveKind::AGGREGATE) {
+        RenderAggregateMembers(out, type, addressExpr, label, opts, depth, aggregateDepth);
+        return;
+    }
+
+    AppendPrintf(out, depth, label + ": <unsupported address read>");
+}
+
+static void RenderRichValueFromRegisterSlots(
+        std::string& out,
+        const sigminer::rich::TypeEntry& type,
+        const std::vector<std::string>& slotExprs,
+        std::size_t baseOffset,
+        const std::string& label,
+        const bpftrace_mapper::rich::ExtendedBpftraceRenderOptions& opts,
+        std::size_t depth,
+        std::size_t aggregateDepth)
+{
+    if (type.isRecursiveReference) {
+        AppendPrintf(out, depth, label + ": <recursive reference>");
+        return;
+    }
+
+    if (type.arrayCount != 0 && type.elementType) {
+        AppendPrintf(out, depth, label + ": <register-backed array rendering unsupported>");
+        return;
+    }
+
+    if (IsScalarKind(type.kind)) {
+        RenderPrimitiveValueFromRegisterSlots(out, type, slotExprs, baseOffset, label, depth);
+        return;
+    }
+
+    if (type.kind == sigminer::PrimitiveKind::POINTER) {
+        RenderPointerValueFromRegisterSlots(out, type, slotExprs, baseOffset, label, opts, depth, aggregateDepth);
+        return;
+    }
+
+    if (type.kind == sigminer::PrimitiveKind::AGGREGATE) {
+        if (aggregateDepth >= opts.maxAggregateDepth) {
+            AppendPrintf(out, depth, label + ": <aggregate depth limit>");
+            return;
+        }
+
+        const std::size_t memberCount = std::min(type.members.size(), opts.maxAggregateMembers);
+        AppendPrintf(out, depth, label + ": {" + type.name + "}");
+        for (std::size_t i = 0; i < memberCount; ++i) {
+            const sigminer::rich::TypeMember& member = type.members[i];
+            if (!member.type)
+                continue;
+            RenderRichValueFromRegisterSlots(
+                    out,
+                    *member.type,
+                    slotExprs,
+                    baseOffset + member.offset,
+                    label + "." + member.name,
+                    opts,
+                    depth,
+                    aggregateDepth + 1);
+        }
+        if (type.members.size() > memberCount)
+            AppendPrintf(out, depth, label + ": <member output truncated>");
+        return;
+    }
+
+    AppendPrintf(out, depth, label + ": <unsupported register-backed read>");
+}
+
+static void RenderPrimitiveValue(
+        std::string& out,
+        const sigminer::rich::TypeEntry& type,
+        const std::string& expr,
+        const std::string& label,
+        std::size_t depth)
+{
+    sigminer::TypeEntry shallow{};
+    shallow.kind = type.kind;
+    shallow.sign = type.sign;
+    shallow.size = type.size;
+    shallow.name = type.name;
+
+    std::string specifier = printf_specifier_mapper::TypeEntryToPrintfSpecifier(shallow);
+    if (specifier.empty()) {
+        AppendPrintf(out, depth, label + ": <unsupported primitive>");
+        return;
+    }
+
+    if (type.kind == sigminer::PrimitiveKind::BOOL) {
+        const std::string valueVar = MakeScratchVar(label, "value");
+        AppendLine(out, depth, valueVar + " = (uint8)(" + expr + ");");
+        AppendLine(
+                out,
+                depth,
+                "printf(\"    " + EscapeStringLiteral(label) + ": " + EscapeStringLiteral(specifier) +
+                        "\\n\", " + valueVar + ");");
+        return;
+    }
+
+    const std::string cast = PrimitiveCastName(type.size, type.sign, type.kind);
+    if (!cast.empty()) {
+        const std::string valueVar = MakeScratchVar(label, "value");
+        AppendLine(out, depth, valueVar + " = (" + cast + ")(" + expr + ");");
+        AppendLine(
+                out,
+                depth,
+                "printf(\"    " + EscapeStringLiteral(label) + ": " + EscapeStringLiteral(specifier) +
+                        "\\n\", " + valueVar + ");");
+        return;
+    }
+
+    AppendLine(
+            out,
+            depth,
+            "printf(\"    " + EscapeStringLiteral(label) + ": " + EscapeStringLiteral(specifier) +
+                    "\\n\", " + expr + ");");
+}
+
+static void RenderPointerValue(
+        std::string& out,
+        const sigminer::rich::TypeEntry& type,
+        const std::string& expr,
+        const std::string& label,
+        const bpftrace_mapper::rich::ExtendedBpftraceRenderOptions& opts,
+        std::size_t depth,
+        std::size_t aggregateDepth)
+{
+    const std::string ptrVar = MakeScratchVar(label, "ptr");
+    AppendLine(out, depth, ptrVar + " = " + expr + ";");
+    AppendLine(out, depth, "printf(\"    " + EscapeStringLiteral(label) + ".addr: %p\\n\", " + ptrVar + ");");
+    AppendLine(out, depth, "if (" + ptrVar + " != 0) {");
+
+    if (!type.pointee) {
+        AppendPrintf(out, depth + 1, label + ": <unknown pointee>");
+        AppendLine(out, depth, "}");
+        return;
+    }
+
+    if (type.isStringLike) {
+        AppendLine(
+                out,
+                depth + 1,
+                "printf(\"    " + EscapeStringLiteral(label) + ": %s\\n\", str(uptr(" + ptrVar + ")));");
+        AppendLine(out, depth, "}");
+        return;
+    }
+
+    if (IsScalarKind(type.pointee->kind)) {
+        RenderPrimitiveValueFromAddress(out, *type.pointee, ptrVar, label + ".value", depth + 1);
+    } else if (type.pointee->kind == sigminer::PrimitiveKind::AGGREGATE) {
+        RenderAggregateMembers(
+                out,
+                *type.pointee,
+                ptrVar,
+                label + ".value",
+                opts,
+                depth + 1,
+                aggregateDepth);
+    } else if (type.pointee->kind == sigminer::PrimitiveKind::POINTER) {
+        RenderPointerValueFromAddress(
+                out,
+                *type.pointee,
+                ptrVar,
+                label + ".value",
+                opts,
+                depth + 1,
+                aggregateDepth);
+    } else if (type.pointee->arrayCount != 0 && type.pointee->elementType) {
+        RenderArrayValue(out, *type.pointee, ptrVar, label + ".value", opts, depth + 1, aggregateDepth);
+    } else {
+        AppendPrintf(out, depth + 1, label + ": <unsupported pointee>");
+    }
+
+    AppendLine(out, depth, "}");
+}
+
+static void RenderRichValue(
+        std::string& out,
+        const sigminer::rich::TypeEntry& type,
+        const std::string& expr,
+        const std::string& label,
+        const bpftrace_mapper::rich::ExtendedBpftraceRenderOptions& opts,
+        std::size_t depth,
+        std::size_t aggregateDepth)
+{
+    if (type.isRecursiveReference) {
+        AppendPrintf(out, depth, label + ": <recursive reference>");
+        return;
+    }
+
+    if (type.arrayCount != 0 && type.elementType) {
+        AppendPrintf(out, depth, label + ": <by-value array rendering unsupported>");
+        return;
+    }
+
+    switch (type.kind) {
+        case sigminer::PrimitiveKind::VOID:
+            AppendPrintf(out, depth, label + ": (void)");
+            break;
+        case sigminer::PrimitiveKind::BOOL:
+        case sigminer::PrimitiveKind::INT:
+        case sigminer::PrimitiveKind::FLOAT:
+        case sigminer::PrimitiveKind::ENUM:
+            RenderPrimitiveValue(out, type, expr, label, depth);
+            break;
+        case sigminer::PrimitiveKind::POINTER:
+            RenderPointerValue(out, type, expr, label, opts, depth, aggregateDepth);
+            break;
+        case sigminer::PrimitiveKind::AGGREGATE:
+            AppendPrintf(out, depth, label + ": <by-value aggregate rendering unsupported>");
+            break;
+        case sigminer::PrimitiveKind::UNKNOWN:
+            AppendPrintf(out, depth, label + ": <unknown>");
+            break;
+    }
+}
+
+static std::string BuildRichArgumentPrintExpr(
+        const sigminer::rich::Signature& sig,
+        const bpftrace_mapper::rich::ExtendedBpftraceRenderOptions& opts)
+{
+    if (sig.params.empty())
+        return "  printf(\"    args: (none)\\n\");\n";
+
+    std::string out;
+    std::size_t nextIntRegIndex = 0;
+    std::size_t nextStackOffset = 8;
+    for (std::size_t i = 0; i < sig.params.size(); ++i) {
+        const sigminer::rich::Parameter& param = sig.params[i];
+        const std::string label = "arg" + std::to_string(i) + " (" + param.name + ")";
+
+        if (!param.type) {
+            AppendPrintf(out, 1, label + ": <unknown type>");
+            continue;
+        }
+
+        const sigminer::rich::TypeEntry& paramType = *param.type;
+
+        if (paramType.kind == sigminer::PrimitiveKind::AGGREGATE) {
+            if (IsMemoryPassedAggregate(paramType)) {
+                const std::string addressExpr =
+                        "reg(\"sp\") + " + std::to_string(nextStackOffset);
+                RenderRichValueFromAddress(out, paramType, addressExpr, label, opts, 1, 0);
+                nextStackOffset += RoundUpToEight(paramType.size);
+            } else if (IsRegisterPassedAggregate(paramType)) {
+                const std::size_t slotCount = AggregateRegisterSlots(paramType);
+                if (nextIntRegIndex + slotCount <= 6) {
+                    std::vector<std::string> slotExprs;
+                    slotExprs.reserve(slotCount);
+                    for (std::size_t slot = 0; slot < slotCount; ++slot) {
+                        bool supported = false;
+                        slotExprs.push_back(
+                                BuildRichArgumentExpr(paramType, nextIntRegIndex + slot, nextStackOffset, &supported));
+                    }
+                    RenderRichValueFromRegisterSlots(out, paramType, slotExprs, 0, label, opts, 1, 0);
+                    nextIntRegIndex += slotCount;
+                } else {
+                    const std::string addressExpr =
+                            "reg(\"sp\") + " + std::to_string(nextStackOffset);
+                    RenderRichValueFromAddress(out, paramType, addressExpr, label, opts, 1, 0);
+                    nextStackOffset += RoundUpToEight(paramType.size);
+                }
+            } else {
+                AppendPrintf(out, 1, label + ": <aggregate ABI class unsupported>");
+            }
+            continue;
+        }
+
+        bool supported = false;
+        const std::string expr =
+                BuildRichArgumentExpr(paramType, nextIntRegIndex, nextStackOffset, &supported);
+        if (!supported) {
+            AppendPrintf(out, 1, label + ": <unsupported calling convention capture>");
+            continue;
+        }
+
+        if (nextIntRegIndex < 6)
+            ++nextIntRegIndex;
+        else
+            nextStackOffset += 8;
+
+        RenderRichValue(out, paramType, expr, label, opts, 1, 0);
+    }
+    return out;
+}
+
+static std::string BuildRichReturnPrintExpr(
+        const sigminer::rich::TypeEntry& retType,
+        const bpftrace_mapper::rich::ExtendedBpftraceRenderOptions& opts)
+{
+    if (retType.kind == sigminer::PrimitiveKind::AGGREGATE) {
+        return "  printf(\"    retval: raw aggregate return unsupported\\n\");\n";
+    }
+
+    std::string out;
+    RenderRichValue(out, retType, "retval", "retval", opts, 1, 0);
+    return out;
+}
+
+static std::string BuildRichProbeBody(
+        BpftraceProbeKind probeKind,
+        const sigminer::rich::Signature& sig,
+        const bpftrace_mapper::rich::ExtendedBpftraceRenderOptions& opts)
+{
+    std::string body;
+
+    if (probeKind == BpftraceProbeKind::ENTRY) {
+        if (opts.includeTimingMs)
+            body += "  @start[tid] = nsecs;\n";
+
+        if (opts.includeArgumentPrinting)
+            body += BuildRichArgumentPrintExpr(sig, opts);
+    } else {
+        if (opts.includeReturnPrinting)
+            body += BuildRichReturnPrintExpr(sig.ret, opts);
+
+        if (opts.includeTimingMs) {
+            body += "  if (@start[tid]) {\n";
+            body += "    $elapsed_ms = (nsecs - @start[tid]) / 1000000;\n";
+            body += "    printf(\"    elapsed_ms: %llu\\n\", $elapsed_ms);\n";
+            body += "    delete(@start[tid]);\n";
+            body += "  }\n";
+        }
+    }
+
+    if (opts.includeUserStack)
+        body += "  print(ustack());\n";
+
+    return body;
 }
 
 } // namespace
@@ -219,5 +1054,39 @@ std::string BuildBpftraceUprobeScript(
 
     return script;
 }
+
+namespace rich {
+
+std::string BuildBpftraceUprobeScript(
+        const BpftraceProbeTarget& target,
+        const sigminer::rich::Signature& sig,
+        const ExtendedBpftraceRenderOptions& opts)
+{
+    std::string selector = BuildProbeSelector(opts);
+    std::string script;
+
+    if (opts.includeEntryProbe) {
+        script += "uprobe:" + target.modulePath + ":" + target.symbol + selector + "\n";
+        script += "{\n";
+        script += BuildProbeHeader(target, BpftraceProbeKind::ENTRY);
+        script += BuildRichProbeBody(BpftraceProbeKind::ENTRY, sig, opts);
+        script += "}\n";
+    }
+
+    if (opts.includeReturnProbe) {
+        if (!script.empty())
+            script += "\n";
+
+        script += "uretprobe:" + target.modulePath + ":" + target.symbol + selector + "\n";
+        script += "{\n";
+        script += BuildProbeHeader(target, BpftraceProbeKind::RETURN);
+        script += BuildRichProbeBody(BpftraceProbeKind::RETURN, sig, opts);
+        script += "}\n";
+    }
+
+    return script;
+}
+
+} // namespace rich
 
 } // namespace bpftrace_mapper
