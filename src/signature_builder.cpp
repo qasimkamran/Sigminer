@@ -132,9 +132,10 @@ sigminer::rich::TypeEntry BuildTypeEntry(
     const auto tag = static_cast<llvm::dwarf::Tag>(resolvedType.getTag());
     const std::uint64_t offset = resolvedType.getOffset();
 
-    entry.kind = type_classifier::TagToKind(tag);
-    entry.sign = type_classifier::GetSignednessFromTypeDie(resolvedType);
-    entry.size = type_classifier::GetSizeFromTypeDie(resolvedType);
+    sigminer::TypeEntry shallowEntry = type_classifier::TypeDieToTypeEntry(resolvedType);
+    entry.kind = shallowEntry.kind;
+    entry.sign = shallowEntry.sign;
+    entry.size = shallowEntry.size;
     entry.name = type_classifier::DieNameOrFallback(resolvedType);
 
     for (llvm::DWARFDie wrapper = type; wrapper.isValid();) {
@@ -209,7 +210,7 @@ sigminer::rich::TypeEntry ResolveToTypeEntryFromType(llvm::DWARFDie type)
     return BuildTypeEntry(type, active, 0);
 }
 
-sigminer::rich::Signature BuildRichSignature(llvm::DWARFDie subprogramDie)
+sigminer::rich::Signature BuildSignature(llvm::DWARFDie subprogramDie)
 {
     sigminer::rich::Signature signature{};
 
