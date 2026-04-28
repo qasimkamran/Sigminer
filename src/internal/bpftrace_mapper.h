@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <vector>
@@ -60,5 +61,21 @@ std::string BuildBpftraceUprobeScript(
 std::string BuildBpftraceUprobeScript(
         const std::vector<BpftraceResolvedSymbol>& resolvedSymbols,
         const BpftraceRenderOptions& opts);
+
+namespace rich {
+
+struct ExtendedBpftraceRenderOptions : BpftraceRenderOptions
+{
+    std::size_t maxAggregateDepth = 2;
+    std::size_t maxAggregateMembers = 16;
+    std::size_t maxArrayElements = 8;
+};
+
+std::string BuildBpftraceUprobeScript(
+        const BpftraceProbeTarget& target,
+        const sigminer::rich::Signature& sig,
+        const ExtendedBpftraceRenderOptions& opts);
+
+} // namespace rich
 
 } // namespace bpftrace_mapper

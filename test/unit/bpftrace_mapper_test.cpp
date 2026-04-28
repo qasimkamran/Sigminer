@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <memory>
 #include <vector>
 
 #include "internal/bpftrace_mapper.h"
@@ -144,6 +145,62 @@ TEST(BpftraceMapperTest, BuildsFullUprobeScriptWithEntryAndReturnProbes)
             "  printf(\"/tmp/libmock_lib.so:RunLiveLoop [return]\\n\");\n"
             "  $ret = (uint64)retval;\n"
             "  printf(\"    retval: (unsigned long) %lu\\n\", $ret);\n"
+            "  if (@start[tid]) {\n"
+            "    $elapsed_ms = (nsecs - @start[tid]) / 1000000;\n"
+            "    printf(\"    elapsed_ms: %llu\\n\", $elapsed_ms);\n"
+            "    delete(@start[tid]);\n"
+            "  }\n"
+            "}\n");
+}
+
+TEST(BpftraceMapperTest, RichBuildsFullUprobeScriptWithPrimitiveArgumentAndReturn)
+{
+    auto argType = std::make_unique<sigminer::rich::TypeEntry>();
+    argType->kind = sigminer::PrimitiveKind::INT;
+    argType->sign = sigminer::Signedness::SIGNED;
+    argType->size = 4;
+    argType->name = "int";
+
+    sigminer::rich::Parameter arg;
+    arg.name = "count";
+    arg.type = std::move(argType);
+
+    sigminer::rich::Signature sig;
+    sig.ret.kind = sigminer::PrimitiveKind::INT;
+    sig.ret.sign = sigminer::Signedness::SIGNED;
+    sig.ret.size = 4;
+    sig.ret.name = "int";
+    sig.params.push_back(std::move(arg));
+
+    bpftrace_mapper::BpftraceProbeTarget target{
+            .modulePath = "/tmp/libmock_lib.so",
+            .symbol = "RunLiveLoop",
+    };
+
+    bpftrace_mapper::rich::ExtendedBpftraceRenderOptions opts;
+    opts.pid = 4242;
+    opts.includeEntryProbe = true;
+    opts.includeReturnProbe = true;
+    opts.includeTimingMs = true;
+    opts.includeUserStack = false;
+    opts.includeArgumentPrinting = true;
+    opts.includeReturnPrinting = true;
+
+    EXPECT_EQ(
+            bpftrace_mapper::rich::BuildBpftraceUprobeScript(target, sig, opts),
+            "uprobe:/tmp/libmock_lib.so:RunLiveLoop /pid == 4242/\n"
+            "{\n"
+            "  printf(\"/tmp/libmock_lib.so:RunLiveLoop [entry]\\n\");\n"
+            "  @start[tid] = nsecs;\n"
+            "  $arg0__count__value = (int32)(reg(\"di\"));\n"
+            "  printf(\"    arg0 (count): (int) %d\\n\", $arg0__count__value);\n"
+            "}\n"
+            "\n"
+            "uretprobe:/tmp/libmock_lib.so:RunLiveLoop /pid == 4242/\n"
+            "{\n"
+            "  printf(\"/tmp/libmock_lib.so:RunLiveLoop [return]\\n\");\n"
+            "  $retval_value = (int32)(retval);\n"
+            "  printf(\"    retval: (int) %d\\n\", $retval_value);\n"
             "  if (@start[tid]) {\n"
             "    $elapsed_ms = (nsecs - @start[tid]) / 1000000;\n"
             "    printf(\"    elapsed_ms: %llu\\n\", $elapsed_ms);\n"
