@@ -30,4 +30,19 @@ Result GetSignatureFromSharedObjectBySymbol(
         const std::string& sharedObjectFilePath,
         const std::string& symbol);
 
+namespace rich {
+
+class Result
+{
+public:
+    std::optional<Signature> sig = std::nullopt;
+    ReturnCode retCode = ReturnCode::SUCCESS;
+};
+
+Result GetSignatureFromSharedObjectBySymbol(
+        const std::string& sharedObjectFilePath,
+        const std::string& symbol);
+
+} // namespace rich
+
 } // namespace sigminer

@@ -49,6 +49,31 @@ typedef struct TypeEntry
     char* Name;
 } TypeEntry;
 
+typedef struct RichTypeEntry RichTypeEntry;
+
+typedef struct RichTypeMember
+{
+    char* Name;
+    size_t Offset;
+    RichTypeEntry* Type;
+} RichTypeMember;
+
+struct RichTypeEntry
+{
+    PrimitiveKind Kind;
+    Signedness Sign;
+    size_t Size;
+    char* Name;
+    bool IsConst;
+    bool IsStringLike;
+    bool IsRecursiveReference;
+    size_t ArrayCount;
+    RichTypeEntry* Pointee;
+    RichTypeEntry* ElementType;
+    RichTypeMember* Members;
+    size_t MemberCount;
+};
+
 typedef struct Signature
 {
     TypeEntry Ret;
@@ -67,8 +92,23 @@ typedef struct Result
 typedef struct RichParameter
 {
     char* Name;
-    TypeEntry Type;
+    RichTypeEntry Type;
 } RichParameter;
+
+typedef struct RichSignature
+{
+    RichTypeEntry Ret;
+    RichParameter* Params;
+    size_t ParamCount;
+    bool HasVarArgs;
+} RichSignature;
+
+typedef struct RichResult
+{
+    RichSignature Sig;
+    bool HasSignature;
+    ReturnCode RetCode;
+} RichResult;
 
 typedef enum BpftraceProbeKind
 {
@@ -92,6 +132,10 @@ typedef struct BpftraceRenderOptions
     bool IncludeUserStack;
     bool IncludeArgumentPrinting;
     bool IncludeReturnPrinting;
+    bool EnableRichTypePrinting;
+    size_t MaxAggregateDepth;
+    size_t MaxAggregateMembers;
+    size_t MaxArrayElements;
 } BpftraceRenderOptions;
 
 typedef struct BpftraceResolvedSymbol
@@ -101,13 +145,18 @@ typedef struct BpftraceResolvedSymbol
 } BpftraceResolvedSymbol;
 
 Result SIGMINER_GetSignatureFromSharedObjectBySymbol( const char* SharedObjectFilePath, const char* Symbol );
+RichResult SIGMINER_GetRichSignatureFromSharedObjectBySymbol(
+        const char* SharedObjectFilePath,
+        const char* Symbol );
 Result SIGMINER_FindSignatureInModulesBySymbol(
         const char* const* ModulePaths,
         size_t ModulePathCount,
         const char* Symbol,
         BpftraceResolvedSymbol* Resolved );
 void SIGMINER_FreeSignature( Signature* Sig );
+void SIGMINER_FreeRichSignature( RichSignature* Sig );
 void SIGMINER_FreeResult( Result* Res );
+void SIGMINER_FreeRichResult( RichResult* Res );
 void SIGMINER_FreeBpftraceResolvedSymbol( BpftraceResolvedSymbol* Resolved );
 void SIGMINER_FreeCString( const char* Str );
 const char* SIGMINER_TypeEntryToPrintfSpecifier( const TypeEntry* typeEntry );
@@ -121,6 +170,10 @@ const char* SIGMINER_BuildBpftraceProbeBody(
 const char* SIGMINER_BuildBpftraceUprobeScriptForTarget(
         const BpftraceProbeTarget* Target,
         const Signature* Sig,
+        const BpftraceRenderOptions* Opts );
+const char* SIGMINER_BuildRichBpftraceUprobeScriptForTarget(
+        const BpftraceProbeTarget* Target,
+        const RichSignature* Sig,
         const BpftraceRenderOptions* Opts );
 const char* SIGMINER_BuildBpftraceUprobeScriptForResolvedSymbols(
         const BpftraceResolvedSymbol* ResolvedSymbols,

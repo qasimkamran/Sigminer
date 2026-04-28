@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "sigminer/sigminer_c.h"
+#include "test/unit/dwarf_test_utils.h"
 
 namespace {
 
@@ -188,4 +189,134 @@ TEST(SigminerCTest, FreeResultReleasesOwnedMemoryAndResetsResult)
     EXPECT_EQ(result.RetCode, RETURN_CODE_SUCCESS);
     EXPECT_EQ(result.Sig.Ret.Name, nullptr);
     EXPECT_EQ(result.Sig.ParamCount, 0u);
+}
+
+TEST(SigminerCTest, GetRichSignatureFromSharedObjectBySymbolBuildsRichSignature)
+{
+    const auto fixturePath = dwarf_test_utils::BuiltArtifactPath("libdwarf_fixture_lib.so");
+
+    RichResult result =
+            SIGMINER_GetRichSignatureFromSharedObjectBySymbol(fixturePath.c_str(), "MixedTypes");
+
+    ASSERT_EQ(result.RetCode, RETURN_CODE_SUCCESS);
+    ASSERT_TRUE(result.HasSignature);
+    EXPECT_EQ(result.Sig.Ret.Kind, PRIMITIVE_KIND_BOOL);
+    EXPECT_STREQ(result.Sig.Ret.Name, "bool");
+    ASSERT_EQ(result.Sig.ParamCount, 4u);
+    EXPECT_STREQ(result.Sig.Params[0].Name, "count");
+    EXPECT_EQ(result.Sig.Params[0].Type.Kind, PRIMITIVE_KIND_INT);
+    EXPECT_STREQ(result.Sig.Params[1].Name, "label");
+    EXPECT_EQ(result.Sig.Params[1].Type.Kind, PRIMITIVE_KIND_POINTER);
+    EXPECT_EQ(result.Sig.Params[1].Type.Pointee->Kind, PRIMITIVE_KIND_INT);
+    EXPECT_STREQ(result.Sig.Params[3].Name, "value");
+    EXPECT_EQ(result.Sig.Params[3].Type.Kind, PRIMITIVE_KIND_AGGREGATE);
+    ASSERT_EQ(result.Sig.Params[3].Type.MemberCount, 2u);
+    EXPECT_STREQ(result.Sig.Params[3].Type.Members[0].Name, "x");
+
+    SIGMINER_FreeRichResult(&result);
+}
+
+TEST(SigminerCTest, BuildRichBpftraceUprobeScriptForTargetFormatsPrimitiveSignature)
+{
+    RichSignature sig{};
+    sig.Ret.Kind = PRIMITIVE_KIND_INT;
+    sig.Ret.Sign = SIGNEDNESS_SIGNED;
+    sig.Ret.Size = 4;
+    sig.Ret.Name = DuplicateCStringForTest("int");
+    sig.ParamCount = 1;
+    sig.Params = static_cast<RichParameter*>(std::calloc(1, sizeof(RichParameter)));
+    ASSERT_NE(sig.Params, nullptr);
+    sig.Params[0].Name = DuplicateCStringForTest("count");
+    sig.Params[0].Type.Kind = PRIMITIVE_KIND_INT;
+    sig.Params[0].Type.Sign = SIGNEDNESS_SIGNED;
+    sig.Params[0].Type.Size = 4;
+    sig.Params[0].Type.Name = DuplicateCStringForTest("int");
+
+    BpftraceProbeTarget target{
+            .ModulePath = "/tmp/libmock_lib.so",
+            .Symbol = "RunLiveLoop",
+    };
+
+    BpftraceRenderOptions opts{};
+    opts.HasPid = true;
+    opts.Pid = 4242;
+    opts.IncludeEntryProbe = true;
+    opts.IncludeReturnProbe = true;
+    opts.IncludeTimingMs = true;
+    opts.IncludeUserStack = false;
+    opts.IncludeArgumentPrinting = true;
+    opts.IncludeReturnPrinting = true;
+
+    const char* script = SIGMINER_BuildRichBpftraceUprobeScriptForTarget(&target, &sig, &opts);
+
+    ASSERT_NE(script, nullptr);
+    EXPECT_STREQ(
+            script,
+            "uprobe:/tmp/libmock_lib.so:RunLiveLoop /pid == 4242/\n"
+            "{\n"
+            "  printf(\"/tmp/libmock_lib.so:RunLiveLoop [entry]\\n\");\n"
+            "  @start[tid] = nsecs;\n"
+            "  $arg0__count__value = (int32)(reg(\"di\"));\n"
+            "  printf(\"    arg0 (count): (int) %d\\n\", $arg0__count__value);\n"
+            "}\n"
+            "\n"
+            "uretprobe:/tmp/libmock_lib.so:RunLiveLoop /pid == 4242/\n"
+            "{\n"
+            "  printf(\"/tmp/libmock_lib.so:RunLiveLoop [return]\\n\");\n"
+            "  $retval_value = (int32)(retval);\n"
+            "  printf(\"    retval: (int) %d\\n\", $retval_value);\n"
+            "  if (@start[tid]) {\n"
+            "    $elapsed_ms = (nsecs - @start[tid]) / 1000000;\n"
+            "    printf(\"    elapsed_ms: %llu\\n\", $elapsed_ms);\n"
+            "    delete(@start[tid]);\n"
+            "  }\n"
+            "}\n");
+
+    SIGMINER_FreeCString(script);
+    SIGMINER_FreeRichSignature(&sig);
+}
+
+TEST(SigminerCTest, FreeRichSignatureReleasesOwnedMemoryAndResetsFields)
+{
+    RichSignature sig{};
+    sig.Ret.Kind = PRIMITIVE_KIND_POINTER;
+    sig.Ret.Sign = SIGNEDNESS_UNKNOWN;
+    sig.Ret.Size = 8;
+    sig.Ret.Name = DuplicateCStringForTest("char *");
+    sig.Ret.IsStringLike = true;
+    sig.Ret.Pointee = static_cast<RichTypeEntry*>(std::calloc(1, sizeof(RichTypeEntry)));
+    ASSERT_NE(sig.Ret.Pointee, nullptr);
+    sig.Ret.Pointee->Kind = PRIMITIVE_KIND_INT;
+    sig.Ret.Pointee->Sign = SIGNEDNESS_UNSIGNED;
+    sig.Ret.Pointee->Size = 1;
+    sig.Ret.Pointee->Name = DuplicateCStringForTest("char");
+
+    sig.ParamCount = 1;
+    sig.Params = static_cast<RichParameter*>(std::calloc(1, sizeof(RichParameter)));
+    ASSERT_NE(sig.Params, nullptr);
+    sig.Params[0].Name = DuplicateCStringForTest("value");
+    sig.Params[0].Type.Kind = PRIMITIVE_KIND_AGGREGATE;
+    sig.Params[0].Type.Name = DuplicateCStringForTest("FixturePoint");
+    sig.Params[0].Type.MemberCount = 1;
+    sig.Params[0].Type.Members =
+            static_cast<RichTypeMember*>(std::calloc(1, sizeof(RichTypeMember)));
+    ASSERT_NE(sig.Params[0].Type.Members, nullptr);
+    sig.Params[0].Type.Members[0].Name = DuplicateCStringForTest("x");
+    sig.Params[0].Type.Members[0].Type =
+            static_cast<RichTypeEntry*>(std::calloc(1, sizeof(RichTypeEntry)));
+    ASSERT_NE(sig.Params[0].Type.Members[0].Type, nullptr);
+    sig.Params[0].Type.Members[0].Type->Kind = PRIMITIVE_KIND_INT;
+    sig.Params[0].Type.Members[0].Type->Sign = SIGNEDNESS_SIGNED;
+    sig.Params[0].Type.Members[0].Type->Size = 4;
+    sig.Params[0].Type.Members[0].Type->Name = DuplicateCStringForTest("int");
+    sig.HasVarArgs = true;
+
+    SIGMINER_FreeRichSignature(&sig);
+
+    EXPECT_EQ(sig.Ret.Kind, PRIMITIVE_KIND_UNKNOWN);
+    EXPECT_EQ(sig.Ret.Name, nullptr);
+    EXPECT_EQ(sig.Ret.Pointee, nullptr);
+    EXPECT_EQ(sig.Params, nullptr);
+    EXPECT_EQ(sig.ParamCount, 0u);
+    EXPECT_FALSE(sig.HasVarArgs);
 }

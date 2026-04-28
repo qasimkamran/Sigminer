@@ -121,7 +121,7 @@ Result GetSignatureFromSharedObjectBySymbol(
         return result;
     }
 
-    result.sig = signature_builder::BuildSignature(subprogram.subprogramDie);
+    result.sig = signature_builder::rich::BuildSignature(subprogram.subprogramDie);
     result.retCode = ReturnCode::SUCCESS;
     return result;
 }

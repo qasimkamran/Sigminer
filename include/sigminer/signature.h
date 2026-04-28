@@ -90,7 +90,7 @@ class TypeEntry
 {
 public:
     TypeEntry() = default;
-    explicit TypeEntry(const struct ::TypeEntry& source);
+    explicit TypeEntry(const struct ::RichTypeEntry& source);
 
     TypeEntry(const TypeEntry& other);
     TypeEntry& operator=(const TypeEntry& other);
@@ -123,7 +123,7 @@ public:
 class Signature {
 public:
     Signature() = default;
-    explicit Signature(const ::Signature& source);
+    explicit Signature(const ::RichSignature& source);
 
     TypeEntry ret{};
     std::vector<Parameter> params{};
