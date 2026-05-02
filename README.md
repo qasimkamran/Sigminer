@@ -1,56 +1,26 @@
 # Sigminer
 
-Sigminer is a C++ library and companion CLI for extracting simplified function signatures from ELF binaries and shared objects by reading DWARF debug information through LLVM. The
-core idea is to take a binary plus a target function name, locate the corresponding DW_TAG_subprogram entry in the DWARF tree, inspect its declared return type and
-formal parameters, and reduce those DWARF types into a compact, machine-usable representation. Instead of preserving the full richness of C/C++ type information, the
-library collapses types into a smaller set of categories such as integer, float, bool, pointer, enum, aggregate, or unknown, while also recording size, signedness,
-and whether the value is pointer-shaped. That makes the output suitable for downstream tooling that cares less about source-level type fidelity and more about ABI-level
-decoding, tracing, or instrumentation.
+A set of C++ libraries for mining signature and type information from ELF object files without having access to any of the source code. Primarily, this repository was built to offer a simple way of taking an object file and its function name to then output simply its return type and parameter types along with some descriptors about these two like size, signedness, etc. (this very functionality can be previewed by running the `proto` executable once built). In an effort to be purpose-fit, I have kept the scope *and implementation* as simple as I could make it, the C ABI is just one example of how purpose-fit is the motive and supplementary files like `printf_specifier_mapper` and `bpftrace_mapper` showcase motive for extending according to usecase.
 
-The repository is split into a small library plus a thin demo executable. The library owns DWARF session setup, subprogram lookup, type unwrapping, type classification,
-and signature assembly. The `proto` executable is just a front-end that calls the library and prints the mined signature.
+### `objdump`? `readelf`?
 
-The public surface includes both a native C++ API and a C ABI. The C ABI lives in `include/sigminer/sigminer_c.h` and exposes plain C enums, structs, allocation helpers,
-and exported functions such as `SIGMINER_GetSignatureFromSharedObjectBySymbol(...)` for consumers that need a stable FFI boundary.
+These tools dump info and can be used to check for compatibility with `QuickApprove.sh` but Sigminer let's you get a bit more out of the ELF parsing and use in your tools.
 
-## RHEL 8 dependencies
+## Usecases
 
-To build the library and demo binary on RHEL 8, install:
+#### 1. Tracing
+Generate accurate function prototypes for tracing tools like `bpftrace`
+#### 2. Generating FFI
+Deriving bindings for other languages through type metadata.
+#### 3. Custom Tooling
+Lightweight ELF parser that can be extended for tool usecase, see `*_mapper` files for example.
+#### 4. Debugging Low-Observability Encironments
+Infer function interface when attaching debuggers is costly, particularly helpful in production environments. Provides insights where logging and telemetry is limited as well.
 
-- `cmake`
-- `llvm`
-- `llvm-devel`
-- `gcc-toolset-11-gcc-c++`
+## Check out the wiki pages
 
-If you also want to run `QuickApprove.sh`, install:
+I am making a continued effort to write about these modules, their usecases and just generally treat the wiki pages section on Github as a Blog for the project. Saves me from flooding README with walls of text too.
 
-- `binutils`
+## Contributions
 
-## File map
-
-### Public headers
-
-- `include/sigminer/sigminer.h`: Main public API entrypoint. Declares `Result`, `ReturnCode`, and `GetSignatureFromSharedObjectBySymbol(...)`.
-- `include/sigminer/sigminer_c.h`: C ABI entrypoint. Declares the exported C enums, structs, memory-release helpers, and `SIGMINER_*` functions for FFI consumers.
-- `include/sigminer/signature.h`: Public data model for extracted signatures and simplified types.
-
-### Internal headers
-
-- `src/internal/dwarf_session.h`: Internal session object for opened binaries and their `DWARFContext`.
-- `src/internal/signature_builder.h`: Internal interface for building a `sigminer::Signature` from a subprogram DIE.
-- `src/internal/subprogram_finder.h`: Internal interface for locating a target `DW_TAG_subprogram` in the DWARF compile units.
-- `src/internal/type_classifier.h`: Internal helpers for turning a resolved DWARF type DIE into a `sigminer::TypeEntry`.
-- `src/internal/type_resolver.h`: Internal helpers for stripping typedef/const/volatile-style wrappers and resolving underlying types.
-
-### Library sources
-
-- `src/dwarf_session.cpp`: Opens the input file as an LLVM object file and creates the DWARF session state used by the library.
-- `src/sigminer.cpp`: Main orchestration layer for the public API. Wires together file opening, symbol lookup, and signature building.
-- `src/signature_builder.cpp`: Builds return and parameter type entries from a function DIE and assembles the final `Signature`.
-- `src/subprogram_finder.cpp`: Searches compile units for the requested function/subprogram DIE.
-- `src/type_classifier.cpp`: Classifies resolved DWARF types into Sigminer’s reduced type model, including kind, size, signedness, and display name.
-- `src/type_resolver.cpp`: Resolves through DWARF wrapper/reference layers to find the underlying type used for classification.
-
-### Demo executable
-
-- `src/prototype.cpp`: Small CLI demo that calls the library and prints the extracted signature in a compact text format.
+Contributions are welcome as bug reports that include some form of repro steps at the moment, please raise Github issues for these. Not taking PRs or direct patches at the moment until a set of guidelines is in place.
