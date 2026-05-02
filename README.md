@@ -4,7 +4,7 @@ A set of C++ libraries for mining signature and type information from ELF object
 
 ### `objdump`? `readelf`?
 
-These tools dump info and can be used to check for compatibility with `QuickApprove.sh` but Sigminer let's you get a bit more out of the ELF parsing and use in your tools.
+These tools dump info and can be used to check for compatibility with `QuickApprove.sh` but Sigminer lets you get a bit more out of the ELF parsing and use in your tools.
 
 ## Usecases
 
@@ -14,13 +14,13 @@ Generate accurate function prototypes for tracing tools like `bpftrace`
 Deriving bindings for other languages through type metadata.
 #### 3. Custom Tooling
 Lightweight ELF parser that can be extended for tool usecase, see `*_mapper` files for example.
-#### 4. Debugging Low-Observability Encironments
+#### 4. Debugging Low-Observability Environments
 Infer function interface when attaching debuggers is costly, particularly helpful in production environments. Provides insights where logging and telemetry is limited as well.
 
 ## Check out the wiki pages
 
-I am making a continued effort to write about these modules, their usecases and just generally treat the wiki pages section on Github as a Blog for the project. Saves me from flooding README with walls of text too.
+I am making a continued effort to write about these modules, their usecases and just generally treat the wiki pages section on GitHub as a Blog for the project. Saves me from flooding README with walls of text too.
 
 ## Contributions
 
-Contributions are welcome as bug reports that include some form of repro steps at the moment, please raise Github issues for these. Not taking PRs or direct patches at the moment until a set of guidelines is in place.
+Contributions are welcome as bug reports that include some form of repro steps at the moment, please raise GitHub issues for these. Not taking PRs or direct patches at the moment until a set of guidelines is in place.
