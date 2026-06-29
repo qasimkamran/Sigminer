@@ -26,6 +26,22 @@ struct ReturnSite
     std::optional<SourceLocation> sourceLocation = std::nullopt;
 };
 
+struct SourceReturnCandidate
+{
+    std::string functionName{};
+    SourceLocation spellingLocation{};
+    SourceLocation expansionLocation{};
+    std::optional<std::uint32_t> discriminator = std::nullopt;
+};
+
+struct SourceReturnProbePoint
+{
+    std::uint64_t instructionAddress = 0;
+    std::uint64_t funcOffset = 0;
+    SourceLocation mappedLocation{};
+    bool matchedEpilogue = false;
+};
+
 class FunctionInfo
 {
 public:

@@ -15,8 +15,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(LLVM CONFIG REQUIRED)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
+find_package(Clang CONFIG REQUIRED)
 
 add_library(sigminer STATIC
+  src/internal/source_return_extractor.h
   src/dwarf_session.cpp
   src/sigminer.cpp
   src/sigminer_c.cpp
@@ -28,6 +30,7 @@ add_library(sigminer STATIC
   src/bpftrace_mapper.cpp
   src/line_table_lookup.cpp
   src/return_site_finder.cpp
+  src/source_return_extractor.cpp
 )
 
 target_include_directories(sigminer
@@ -40,21 +43,11 @@ target_include_directories(sigminer
 
 target_compile_definitions(sigminer PRIVATE ${LLVM_DEFINITIONS})
 
-llvm_map_components_to_libnames(SIGMINER_LLVM_LIBS
-  Object
-  DebugInfoDWARF
-  Support
-  MC
-  MCDisassembler
-  X86Desc
-  X86Disassembler
-  X86Info
-  AArch64Desc
-  AArch64Disassembler
-  AArch64Info
+target_link_libraries(sigminer
+  PRIVATE
+    LLVM
+    clang-cpp
 )
-
-target_link_libraries(sigminer PRIVATE ${SIGMINER_LLVM_LIBS})
 
 add_executable(proto
   src/prototype.cpp
@@ -149,6 +142,7 @@ if(BUILD_TESTING)
         test/unit/bpftrace_mapper_test.cpp
         test/unit/printf_specifier_mapper_test.cpp
         test/unit/return_site_finder_test.cpp
+        test/unit/source_return_extractor_test.cpp
         test/unit/signature_builder_test.cpp
         test/unit/sigminer_c_test.cpp
         test/unit/subprogram_finder_test.cpp

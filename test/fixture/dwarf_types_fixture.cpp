@@ -26,6 +26,20 @@ int NestedFunction(int value)
 
 } // namespace fixture_ns
 
+namespace fixture_overload {
+
+int OverloadedReturn(int value)
+{
+    return value;
+}
+
+double OverloadedReturn(double value)
+{
+    return value;
+}
+
+} // namespace fixture_overload
+
 extern "C" {
 
 __attribute__((noinline, visibility("default")))
