@@ -26,6 +26,8 @@ add_library(sigminer STATIC
   src/type_resolver.cpp
   src/printf_specifier_mapper.cpp
   src/bpftrace_mapper.cpp
+  src/line_table_lookup.cpp
+  src/return_site_finder.cpp
 )
 
 target_include_directories(sigminer
@@ -47,6 +49,9 @@ llvm_map_components_to_libnames(SIGMINER_LLVM_LIBS
   X86Desc
   X86Disassembler
   X86Info
+  AArch64Desc
+  AArch64Disassembler
+  AArch64Info
 )
 
 target_link_libraries(sigminer PRIVATE ${SIGMINER_LLVM_LIBS})
@@ -143,6 +148,7 @@ if(BUILD_TESTING)
         test/integration/dwarf_session_test.cpp
         test/unit/bpftrace_mapper_test.cpp
         test/unit/printf_specifier_mapper_test.cpp
+        test/unit/return_site_finder_test.cpp
         test/unit/signature_builder_test.cpp
         test/unit/sigminer_c_test.cpp
         test/unit/subprogram_finder_test.cpp

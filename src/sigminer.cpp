@@ -13,13 +13,13 @@ namespace {
 struct DwarfSessionResult
 {
     std::optional<dwarf_session::Session> session = std::nullopt;
-    ReturnCode retCode = ReturnCode::SUCCESS;
+    ReturnCode retCode = ReturnCode::INTERNAL_FAILURE;
 };
 
 struct SubprogramResult
 {
     llvm::DWARFDie subprogramDie{};
-    ReturnCode retCode = ReturnCode::SUCCESS;
+    ReturnCode retCode = ReturnCode::INTERNAL_FAILURE;
 };
 
 } // namespace

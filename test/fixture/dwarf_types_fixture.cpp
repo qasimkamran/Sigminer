@@ -72,4 +72,11 @@ Callback TakesCallback(Callback callback)
     return callback;
 }
 
+#line 200 "dwarf_types_fixture.cpp"
+__attribute__((noinline, visibility("default")))
+int ReturnSiteSingle(int value)
+{
+    value += 1;
+    return value; }
+
 } // extern "C"

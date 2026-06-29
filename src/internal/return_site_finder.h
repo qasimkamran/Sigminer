@@ -7,9 +7,8 @@
 #include <llvm/DebugInfo/DWARF/DWARFDie.h>
 #include <llvm/Object/ObjectFile.h>
 
-llvm::DWARFAddressRangesVector GetSubprogramDiAddressRanges(const llvm::DWARFDie& subprogramDie);
+llvm::DWARFAddressRangesVector GetSubprogramDieAddressRanges(const llvm::DWARFDie& subprogramDie);
 
 std::vector<sigminer::ReturnSite> GetReturnSitesWithinSubprogramDie(
         const llvm::DWARFDie& subprogramDie,
         const llvm::object::ObjectFile& object);
-

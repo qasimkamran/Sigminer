@@ -68,10 +68,21 @@ bool InitializeTargetForTriple(const llvm::Triple& triple)
         return true;
     }();
 
+    static const bool aarch64Initialized = [] {
+        LLVMInitializeAArch64TargetInfo();
+        LLVMInitializeAArch64TargetMC();
+        LLVMInitializeAArch64Disassembler();
+        return true;
+    }();
+
     switch (triple.getArch()) {
         case llvm::Triple::x86:
         case llvm::Triple::x86_64:
             (void) x86Initialized;
+            return true;
+        case llvm::Triple::aarch64:
+        case llvm::Triple::aarch64_be:
+            (void) aarch64Initialized;
             return true;
         default:
             return false;

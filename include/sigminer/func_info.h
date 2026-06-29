@@ -40,7 +40,7 @@ class FunctionInfoResult
 {
 public:
     std::optional<FunctionInfo> functionInfo = std::nullopt;
-    ReturnCode retCode = ReturnCode::SUCCESS;
+    ReturnCode retCode = ReturnCode::INTERNAL_FAILURE;
 };
 
 FunctionInfoResult GetFunctionInfoFromSharedObjectBySymbol(

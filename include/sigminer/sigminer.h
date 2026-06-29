@@ -23,7 +23,7 @@ class Result
 {
 public:
     std::optional<Signature> sig = std::nullopt;
-    ReturnCode retCode = ReturnCode::SUCCESS;
+    ReturnCode retCode = ReturnCode::INTERNAL_FAILURE;
 };
 
 Result GetSignatureFromSharedObjectBySymbol(
@@ -36,7 +36,7 @@ class Result
 {
 public:
     std::optional<Signature> sig = std::nullopt;
-    ReturnCode retCode = ReturnCode::SUCCESS;
+    ReturnCode retCode = ReturnCode::INTERNAL_FAILURE;
 };
 
 Result GetSignatureFromSharedObjectBySymbol(
