@@ -42,6 +42,11 @@ llvm_map_components_to_libnames(SIGMINER_LLVM_LIBS
   Object
   DebugInfoDWARF
   Support
+  MC
+  MCDisassembler
+  X86Desc
+  X86Disassembler
+  X86Info
 )
 
 target_link_libraries(sigminer PRIVATE ${SIGMINER_LLVM_LIBS})
