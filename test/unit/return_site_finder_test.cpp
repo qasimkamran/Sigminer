@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "internal/dwarf_session.h"
+#include "internal/dwarf_ranges.h"
 #include "internal/line_table_lookup.h"
 #include "internal/return_site_finder.h"
 #include "test/unit/dwarf_test_utils.h"
@@ -48,12 +49,17 @@ TEST(ReturnSiteFinderTest, FindsMachineReturnWithinFunctionAddressRange)
     ReturnSiteFixture fixture = OpenReturnSiteFixture();
     ASSERT_TRUE(fixture.subprogram.isValid());
 
-    const llvm::DWARFAddressRangesVector ranges =
-            GetSubprogramDieAddressRanges(fixture.subprogram);
+    llvm::Expected<llvm::DWARFAddressRangesVector> rangesOrErr =
+            dwarf_ranges::GetDieAddressRanges(fixture.subprogram);
+    ASSERT_TRUE(static_cast<bool>(rangesOrErr))
+            << dwarf_test_utils::ToString(rangesOrErr.takeError());
+    const llvm::DWARFAddressRangesVector& ranges = *rangesOrErr;
     ASSERT_FALSE(ranges.empty());
 
     const std::vector<sigminer::ReturnSite> returnSites =
-            GetReturnSitesWithinSubprogramDie(fixture.subprogram, *fixture.session.object);
+            return_site_finder::GetReturnSitesWithinSubprogramDie(
+                    fixture.subprogram,
+                    *fixture.session.object);
     ASSERT_EQ(returnSites.size(), 1u);
 
     const sigminer::ReturnSite& returnSite = returnSites.front();
@@ -75,13 +81,17 @@ TEST(ReturnSiteFinderTest, MapsMachineReturnToStableSourceLocation)
     ASSERT_TRUE(fixture.subprogram.isValid());
 
     std::vector<sigminer::ReturnSite> returnSites =
-            GetReturnSitesWithinSubprogramDie(fixture.subprogram, *fixture.session.object);
+            return_site_finder::GetReturnSitesWithinSubprogramDie(
+                    fixture.subprogram,
+                    *fixture.session.object);
     ASSERT_EQ(returnSites.size(), 1u);
 
-    ASSERT_TRUE(PopulateSourceLocationForReturnSite(
+    llvm::Error populateError = line_table_lookup::PopulateSourceLocationForReturnSite(
             *fixture.session.context,
             fixture.subprogram,
-            returnSites.front()));
+            returnSites.front());
+    ASSERT_FALSE(static_cast<bool>(populateError))
+            << dwarf_test_utils::ToString(std::move(populateError));
     ASSERT_TRUE(returnSites.front().sourceLocation.has_value());
 
     const sigminer::SourceLocation& location = *returnSites.front().sourceLocation;
@@ -94,7 +104,19 @@ TEST(ReturnSiteFinderTest, RejectsInvalidSubprogram)
     ReturnSiteFixture fixture = OpenReturnSiteFixture();
     const llvm::DWARFDie invalidDie{};
 
-    EXPECT_TRUE(GetSubprogramDieAddressRanges(invalidDie).empty());
-    EXPECT_TRUE(GetReturnSitesWithinSubprogramDie(invalidDie, *fixture.session.object).empty());
-    EXPECT_FALSE(GetSourceLocationForAddress(*fixture.session.context, invalidDie, 0).has_value());
+    llvm::Expected<llvm::DWARFAddressRangesVector> rangesOrErr =
+            dwarf_ranges::GetDieAddressRanges(invalidDie);
+    EXPECT_FALSE(static_cast<bool>(rangesOrErr));
+    llvm::consumeError(rangesOrErr.takeError());
+    EXPECT_TRUE(return_site_finder::GetReturnSitesWithinSubprogramDie(
+            invalidDie,
+            *fixture.session.object).empty());
+
+    llvm::Expected<sigminer::SourceLocation> locationOrErr =
+            line_table_lookup::GetSourceLocationForAddress(
+                    *fixture.session.context,
+                    invalidDie,
+                    0);
+    EXPECT_FALSE(static_cast<bool>(locationOrErr));
+    llvm::consumeError(locationOrErr.takeError());
 }

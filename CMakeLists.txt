@@ -19,7 +19,9 @@ find_package(Clang CONFIG REQUIRED)
 
 add_library(sigminer STATIC
   src/internal/source_return_extractor.h
+  src/internal/dwarf_ranges.h
   src/dwarf_session.cpp
+  src/dwarf_ranges.cpp
   src/sigminer.cpp
   src/sigminer_c.cpp
   src/signature_builder.cpp

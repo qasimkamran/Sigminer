@@ -1,7 +1,7 @@
 #include "internal/return_site_finder.h"
+#include "internal/dwarf_ranges.h"
 #include "sigminer/func_info.h"
 
-#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -137,19 +137,7 @@ std::unique_ptr<DisassemblerContext> CreateDisassemblerContext(
 
 } // namespace
 
-llvm::DWARFAddressRangesVector GetSubprogramDieAddressRanges(const llvm::DWARFDie& subprogramDie)
-{
-    if (!subprogramDie)
-        return {};
-
-    llvm::Expected<llvm::DWARFAddressRangesVector> rangesOrErr = subprogramDie.getAddressRanges();
-    if (!rangesOrErr) {
-        llvm::consumeError(rangesOrErr.takeError());
-        return {};
-    }
-
-    return std::move(*rangesOrErr);
-}
+namespace return_site_finder {
 
 std::vector<sigminer::ReturnSite> GetReturnSitesWithinSubprogramDie(
         const llvm::DWARFDie& subprogramDie,
@@ -163,13 +151,15 @@ std::vector<sigminer::ReturnSite> GetReturnSitesWithinSubprogramDie(
     if (!disasmCtx)
         return {};
 
-    const llvm::DWARFAddressRangesVector addressRanges = GetSubprogramDieAddressRanges(subprogramDie);
-    std::uint64_t functionLow = std::numeric_limits<std::uint64_t>::max();
-    for (const llvm::DWARFAddressRange& range : addressRanges) {
-        if (range.LowPC < range.HighPC)
-            functionLow = std::min(functionLow, range.LowPC);
+    llvm::Expected<llvm::DWARFAddressRangesVector> addressRangesOrErr =
+            dwarf_ranges::GetDieAddressRanges(subprogramDie);
+    if (!addressRangesOrErr) {
+        llvm::consumeError(addressRangesOrErr.takeError());
+        return {};
     }
 
+    const llvm::DWARFAddressRangesVector& addressRanges = *addressRangesOrErr;
+    const std::uint64_t functionLow = dwarf_ranges::GetFunctionLow(addressRanges);
     if (functionLow == std::numeric_limits<std::uint64_t>::max())
         return {};
 
@@ -240,3 +230,5 @@ std::vector<sigminer::ReturnSite> GetReturnSitesWithinSubprogramDie(
     }
     return returnSites;
 }
+
+} // namespace return_site_finder
